@@ -8,6 +8,7 @@ final class WorkspaceViewController: NSViewController, NSSplitViewDelegate {
     private(set) var activeBrowser: BrowserViewController
     private(set) var dualPane: Bool
     let sidebar = FolderSidebar()
+    let inspector = PreviewInspectorController()
     let titlebarTabs = TitlebarSurface()
     private let outer = ExplorerSplitView()
     private let panes = ExplorerSplitView()
@@ -37,7 +38,7 @@ final class WorkspaceViewController: NSViewController, NSSplitViewDelegate {
     }
     override func loadView() {
         view = Surface(frame: NSRect(x: 0, y: 0, width: 1160, height: 760))
-        toolbar.color = .controlBackgroundColor
+        toolbar.color = Palette.surface
         headers.color = Palette.chrome
         titlebarTabs.color = Palette.chrome
         titlebarTabs.onLayout = { [weak self] in self?.layoutTitlebarTabs() }
@@ -49,6 +50,14 @@ final class WorkspaceViewController: NSViewController, NSSplitViewDelegate {
         sidebar.onNewTab = { [weak self] in self?.activeBrowser.newTab(url: $0) }
         sidebar.onOtherPane = { [weak self] in self?.openOtherPane($0) }
         outer.addArrangedSubview(sidebar.view); outer.addArrangedSubview(panes)
+        inspector.onOpen = { [weak self] in self?.activeBrowser.openSelected() }
+        inspector.onOpenInEditor = { [weak self] urls in ExternalApplications.openEditor(files: urls, window: self?.view.window) }
+        inspector.onOpenInTerminal = { [weak self] folder in ExternalApplications.openTerminal(at: folder, window: self?.view.window) }
+        inspector.onProperties = { [weak self] urls in FileProperties.show(urls, window: self?.view.window) }
+        if AppPreferences.shared.showPreviewPane {
+            addChild(inspector)
+            outer.addArrangedSubview(inspector.view)
+        }
         addChild(left); panes.addArrangedSubview(left.view)
         if let right, dualPane { addChild(right); panes.addArrangedSubview(right.view) }
         for child in [headers, toolbar, outer] { view.addSubview(child); child.translatesAutoresizingMaskIntoConstraints = false }
@@ -68,6 +77,9 @@ final class WorkspaceViewController: NSViewController, NSSplitViewDelegate {
     override func viewDidAppear() {
         super.viewDidAppear(); updateMinimumSize()
         outer.setPosition(210, ofDividerAt: 0)
+        if AppPreferences.shared.showPreviewPane, outer.arrangedSubviews.count > 2 {
+            outer.setPosition(max(460, outer.bounds.width - 280), ofDividerAt: 1)
+        }
         if dualPane { panes.setPosition(panes.bounds.width / 2, ofDividerAt: 0) }
         activate(activeBrowser, force: true); view.window?.makeFirstResponder(activeBrowser.activeFileView)
     }
@@ -82,7 +94,7 @@ final class WorkspaceViewController: NSViewController, NSSplitViewDelegate {
             NSLayoutConstraint.activate([bar.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor), bar.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor), bar.topAnchor.constraint(equalTo: toolbar.topAnchor), bar.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor)])
             displayedToolbar = bar
         }
-        updatePaneLabels(); syncSidebar(from: browser); browser.updateStatus(); updateWindowTitle(); saveSession()
+        updatePaneLabels(); syncSidebar(from: browser); updateInspector(from: browser); browser.updateStatus(); updateWindowTitle(); saveSession()
     }
     func activatePane(containing view: NSView?) {
         guard let view else { return }
@@ -213,9 +225,47 @@ final class WorkspaceViewController: NSViewController, NSSplitViewDelegate {
             browser.paneHeader?.color = Palette.chrome
             browser.view.setAccessibilityLabel(dualPane ? paneAccessibilityLabel(isLeft: browser === left, active: active) : L10n.text("File browser"))
             browser.dualButton?.active = dualPane
+            browser.previewPaneButton?.active = AppPreferences.shared.showPreviewPane
             browser.copyOtherButton?.isHidden = !dualPane; browser.moveOtherButton?.isHidden = !dualPane
             browser.updateStatus()
         }
+    }
+    func togglePreviewPane() {
+        AppPreferences.shared.showPreviewPane.toggle()
+        syncPreviewPanePreference()
+    }
+    func syncPreviewPanePreference() {
+        let visible = AppPreferences.shared.showPreviewPane
+        let hasInspector = outer.arrangedSubviews.contains(inspector.view)
+        if visible && !hasInspector {
+            if inspector.parent == nil { addChild(inspector) }
+            outer.addArrangedSubview(inspector.view)
+            view.layoutSubtreeIfNeeded()
+            outer.setPosition(max(460, outer.bounds.width - 280), ofDividerAt: 1)
+            updateInspector(from: activeBrowser)
+        } else if !visible && hasInspector {
+            inspector.view.removeFromSuperview()
+            inspector.removeFromParent()
+        }
+        updatePaneLabels()
+    }
+    func updateInspector(from browser: BrowserViewController) {
+        guard ready, browser === activeBrowser, AppPreferences.shared.showPreviewPane else { return }
+        let items = browser.tab.isThisMac ? [] : browser.selectedItems
+        let folder: URL? = browser.tab.isThisMac ? BrowserLocation.thisMac : browser.tab.history.current
+        inspector.update(items: items, currentFolder: folder, cachedFolderSizes: browser.folderSizes)
+    }
+    func refreshTheme() {
+        guard ready else { return }
+        view.window?.backgroundColor = Palette.chrome
+        toolbar.color = Palette.surface
+        headers.color = Palette.chrome
+        titlebarTabs.color = Palette.chrome
+        sidebar.refreshTheme()
+        inspector.refreshTheme()
+        left.refreshTheme()
+        right?.refreshTheme()
+        view.needsDisplay = true
     }
     private func paneAccessibilityLabel(isLeft: Bool, active: Bool) -> String {
         switch (isLeft, active) {
@@ -247,9 +297,17 @@ final class WorkspaceViewController: NSViewController, NSSplitViewDelegate {
         SessionStore.save(WorkspaceSession(left: left.session, right: right?.session, dualPane: dualPane, activeRight: activeBrowser === right))
     }
     func shutdown() { left.suspend(); right?.suspend() }
-    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { splitView === outer ? 165 : 420 }
-    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { splitView === outer ? min(300, splitView.bounds.width - (dualPane ? 840 : 620)) : splitView.bounds.width - 420 }
-    func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool { splitView !== outer || view !== sidebar.view }
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        guard splitView === outer else { return 420 }
+        return dividerIndex == 0 ? 165 : max(420, outer.bounds.width - 420)
+    }
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        guard splitView === outer else { return splitView.bounds.width - 420 }
+        return dividerIndex == 0 ? min(300, splitView.bounds.width - (dualPane ? 840 : 620)) : outer.bounds.width - 230
+    }
+    func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
+        splitView !== outer || view === panes
+    }
 }
 
 @MainActor

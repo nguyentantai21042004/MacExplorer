@@ -64,6 +64,7 @@ extension BrowserViewController {
         }
         suppressSelection = false
         updateStatus(); updateEmptyState(); updateQuickLookSelection()
+        workspace?.updateInspector(from: self)
     }
     func toggleGroup(_ id: String) {
         workspace?.activate(self); rememberSelection()
@@ -86,7 +87,9 @@ extension BrowserViewController {
         file(atRow: row) == nil ? 36 : viewMode == .content ? ContentResultCell.rowHeight(for: tableScroll.contentSize.width) : 29
     }
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let view = FileRowView(); view.contentSeparator = viewMode == .content && file(atRow: row) != nil
+        let view = FileRowView()
+        view.contentSeparator = viewMode == .content && file(atRow: row) != nil
+        view.alternatingTint = viewMode == .details && row % 2 == 1
         return view
     }
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { file(atRow: row) != nil }

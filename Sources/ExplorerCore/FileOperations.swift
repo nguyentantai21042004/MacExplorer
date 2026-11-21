@@ -5,6 +5,7 @@ public enum FileOperation: Sendable {
     case copy([URL], to: URL)
     case move([URL], to: URL)
     case rename(URL, to: String)
+    case batchRename([(URL, String)])
     case newFolder(in: URL, name: String)
     case newFile(in: URL, name: String)
     case trash([URL])
@@ -17,6 +18,7 @@ public enum FileOperation: Sendable {
         case .copy: L10n.text("Copy")
         case .move: L10n.text("Move")
         case .rename: L10n.text("Rename")
+        case .batchRename: L10n.text("Batch Rename")
         case .newFolder: L10n.text("New Folder")
         case .newFile: L10n.text("New File")
         case .trash: L10n.text("Trash")
@@ -116,19 +118,30 @@ public actor FileOperationEngine {
         do {
             let sources: [URL]
             let destinationFolder: URL?
+            let renameTargets: [String]
             switch operation {
             case let .copy(urls, destination), let .move(urls, destination):
                 sources = try normalizedSelection(urls)
                 destinationFolder = destination.resolvingSymlinksInPath().standardizedFileURL
                 try FileSystem.validateDirectory(destinationFolder!)
-            case let .trash(urls): sources = try normalizedSelection(urls); destinationFolder = nil
+                renameTargets = []
+            case let .trash(urls): sources = try normalizedSelection(urls); destinationFolder = nil; renameTargets = []
             case let .color(urls, _):
-                sources = Array(Set(urls.map { canonicalItem($0) })).sorted { $0.path < $1.path }; destinationFolder = nil
+                sources = Array(Set(urls.map { canonicalItem($0) })).sorted { $0.path < $1.path }; destinationFolder = nil; renameTargets = []
             case let .rename(url, name):
-                try Self.validateName(name); sources = [canonicalItem(url)]; destinationFolder = nil
+                try Self.validateName(name); sources = [canonicalItem(url)]; destinationFolder = nil; renameTargets = [name]
+            case let .batchRename(pairs):
+                var canonicalSources: [URL] = []
+                var targets: [String] = []
+                for (url, name) in pairs {
+                    try Self.validateName(name)
+                    canonicalSources.append(canonicalItem(url))
+                    targets.append(name)
+                }
+                sources = canonicalSources; destinationFolder = nil; renameTargets = targets
             case let .newFolder(parent, name), let .newFile(parent, name):
                 try Self.validateName(name); try FileSystem.validateDirectory(parent)
-                sources = [parent.resolvingSymlinksInPath().appendingPathComponent(name)]; destinationFolder = nil
+                sources = [parent.resolvingSymlinksInPath().appendingPathComponent(name)]; destinationFolder = nil; renameTargets = []
             case .compress, .extract: fatalError("Handled above")
             }
             for (index, source) in sources.enumerated() {
@@ -173,7 +186,7 @@ public actor FileOperationEngine {
                 switch operation {
                 case .copy: destination = destinationFolder!.appendingPathComponent(source.lastPathComponent); copying = true
                 case .move: destination = destinationFolder!.appendingPathComponent(source.lastPathComponent); copying = false
-                case let .rename(_, name): destination = source.deletingLastPathComponent().appendingPathComponent(name); copying = false
+                case .rename, .batchRename: destination = source.deletingLastPathComponent().appendingPathComponent(renameTargets[index]); copying = false
                 default: fatalError("Handled above")
                 }
                 if original.isDirectory && isInside(destination, source) {
@@ -187,7 +200,12 @@ public actor FileOperationEngine {
                     if copying { destination = uniqueCopy(of: destination, directory: original.isDirectory) }
                     else { report.skipped += 1; continue }
                 } else if sameEntry {
-                    if case .rename = operation, source.lastPathComponent.lowercased() == destination.lastPathComponent.lowercased() {
+                    let isRenameOp: Bool
+                    switch operation {
+                    case .rename, .batchRename: isRenameOp = true
+                    default: isRenameOp = false
+                    }
+                    if isRenameOp, source.lastPathComponent.lowercased() == destination.lastPathComponent.lowercased() {
                         // A case-only rename on a case-insensitive volume needs an intermediate name.
                         let staging = temporarySibling(of: source)
                         try exclusiveMove(source, staging)

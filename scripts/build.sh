@@ -38,7 +38,6 @@ cp .build/AppIcon.icns "$APP_STAGE/Contents/Resources/AppIcon.icns"
 cp LICENSE "$APP_STAGE/Contents/Resources/LICENSE.txt"
 ditto Support/Licenses "$APP_STAGE/Contents/Resources/Licenses"
 if (( RELEASE_BUILD )); then
-  plutil -replace ExplorerUpdatesEnabled -bool YES "$APP_STAGE/Contents/Info.plist"
   zsh scripts/sign-app.sh "$APP_STAGE" "$DEVELOPER_ID_APPLICATION"
   APP_PATH="$PROJECT_ROOT/build/release/Explorer.app"
 else

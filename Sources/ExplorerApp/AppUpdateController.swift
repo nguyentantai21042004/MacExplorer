@@ -47,7 +47,7 @@ final class AppUpdateController: NSObject, SPUUpdaterDelegate {
     private let gate = UpdateRelaunchGate {
         !FileOperationController.shared.busy && NSApp.modalWindow == nil && !NSApp.windows.contains { $0.attachedSheet != nil }
     }
-    private(set) var status = L10n.text("Automatic updates are available in official releases.")
+    private(set) var status = L10n.text("Automatic upstream updates are disabled in this custom build.")
     var isAvailable: Bool { controller != nil }
     var canCheck: Bool { controller?.updater.canCheckForUpdates == true }
     var lastCheck: Date? { controller?.updater.lastUpdateCheckDate }

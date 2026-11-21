@@ -3,26 +3,119 @@ import ExplorerCore
 
 @MainActor
 enum Palette {
+    private static func hex(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, a: CGFloat = 1) -> NSColor {
+        NSColor(srgbRed: r / 255.0, green: g / 255.0, blue: b / 255.0, alpha: a)
+    }
+    private static func dynamic(light: @escaping @Sendable () -> NSColor, dark: @escaping @Sendable () -> NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark() : light()
+        }
+    }
+    private static var currentTheme: AppTheme { AppPreferences.shared.theme }
+
     static let chrome = NSColor(name: "ExplorerChrome") { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor(calibratedRed: 0.80, green: 0.88, blue: 0.93, alpha: 1)
+        switch currentTheme {
+        case .system:
+            return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.12, alpha: 1) : hex(204, 224, 237)
+        case .slateCyan: return hex(23, 27, 30)
+        case .tokyoNight: return hex(21, 22, 30)
+        case .nord: return hex(36, 41, 51)
+        case .catppuccin: return hex(17, 17, 27)
+        }
     }
     static let sidebar = NSColor(name: "ExplorerSidebar") { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(calibratedWhite: 0.13, alpha: 1) : NSColor(calibratedWhite: 1, alpha: 1)
+        switch currentTheme {
+        case .system:
+            return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.13, alpha: 1) : NSColor(calibratedWhite: 1, alpha: 1)
+        case .slateCyan: return hex(22, 29, 34)
+        case .tokyoNight: return hex(22, 22, 30)
+        case .nord: return hex(39, 44, 54)
+        case .catppuccin: return hex(24, 24, 37)
+        }
     }
     static let navigation = NSColor(name: "ExplorerNavigation") { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(calibratedWhite: 0.18, alpha: 1) : NSColor(calibratedRed: 0.965, green: 0.985, blue: 0.997, alpha: 1)
+        switch currentTheme {
+        case .system:
+            return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.18, alpha: 1) : hex(246, 251, 254)
+        case .slateCyan: return hex(32, 36, 40)
+        case .tokyoNight: return hex(31, 35, 53)
+        case .nord: return hex(59, 66, 82)
+        case .catppuccin: return hex(37, 37, 56)
+        }
+    }
+    static let surface = NSColor(name: "ExplorerSurface") { appearance in
+        switch currentTheme {
+        case .system: return .controlBackgroundColor
+        case .slateCyan: return hex(30, 30, 30)
+        case .tokyoNight: return hex(26, 27, 38)
+        case .nord: return hex(46, 52, 64)
+        case .catppuccin: return hex(30, 30, 46)
+        }
+    }
+    static let surfaceAlt = NSColor(name: "ExplorerSurfaceAlt") { appearance in
+        switch currentTheme {
+        case .system:
+            return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.17, alpha: 1) : NSColor(calibratedWhite: 0.97, alpha: 1)
+        case .slateCyan: return hex(40, 40, 42)
+        case .tokyoNight: return hex(31, 35, 53)
+        case .nord: return hex(53, 60, 74)
+        case .catppuccin: return hex(36, 36, 54)
+        }
+    }
+    static let inspector = NSColor(name: "ExplorerInspector") { appearance in
+        switch currentTheme {
+        case .system:
+            return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.16, alpha: 1) : NSColor(calibratedWhite: 0.98, alpha: 1)
+        case .slateCyan: return hex(41, 44, 48)
+        case .tokyoNight: return hex(29, 32, 48)
+        case .nord: return hex(50, 57, 70)
+        case .catppuccin: return hex(34, 34, 52)
+        }
     }
     static let line = NSColor(name: "ExplorerLine") { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(calibratedWhite: 0.26, alpha: 1) : NSColor(calibratedRed: 0.83, green: 0.87, blue: 0.90, alpha: 1)
+        switch currentTheme {
+        case .system:
+            return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(calibratedWhite: 0.26, alpha: 1) : hex(212, 222, 230)
+        case .slateCyan: return hex(51, 56, 62)
+        case .tokyoNight: return hex(47, 53, 73)
+        case .nord: return hex(67, 76, 94)
+        case .catppuccin: return hex(49, 50, 68)
+        }
+    }
+    static let accent = NSColor(name: "ExplorerAccent") { _ in
+        switch currentTheme {
+        case .system: return .systemBlue
+        case .slateCyan: return hex(30, 161, 224)
+        case .tokyoNight: return hex(122, 162, 247)
+        case .nord: return hex(136, 192, 208)
+        case .catppuccin: return hex(137, 180, 250)
+        }
     }
     static let groupText = NSColor(name: "ExplorerGroupText") { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .systemBlue : NSColor(calibratedRed: 0.13, green: 0.32, blue: 0.65, alpha: 1)
+        switch currentTheme {
+        case .system:
+            return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .systemBlue : hex(33, 82, 166)
+        case .slateCyan: return hex(30, 161, 224)
+        case .tokyoNight: return hex(122, 162, 247)
+        case .nord: return hex(136, 192, 208)
+        case .catppuccin: return hex(137, 180, 250)
+        }
     }
-    static let selected = NSColor.systemBlue.withAlphaComponent(0.12)
+    static let selected = NSColor(name: "ExplorerSelected") { _ in
+        switch currentTheme {
+        case .system: return NSColor.systemBlue.withAlphaComponent(0.14)
+        case .slateCyan: return hex(0, 131, 196, a: 0.30)
+        case .tokyoNight: return hex(122, 162, 247, a: 0.24)
+        case .nord: return hex(136, 192, 208, a: 0.24)
+        case .catppuccin: return hex(137, 180, 250, a: 0.24)
+        }
+    }
     static let folderIcon = makeFolderIcon()
     static func makeFolderIcon(tint: NSColor? = nil) -> NSImage {
       NSImage(size: NSSize(width: 64, height: 52), flipped: false) { _ in
@@ -153,7 +246,18 @@ final class SidebarRowView: NSTableRowView {
 @MainActor
 final class FileRowView: NSTableRowView {
     var contentSeparator = false { didSet { needsDisplay = true } }
+    var alternatingTint = false { didSet { needsDisplay = true } }
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+    override func drawBackground(in dirtyRect: NSRect) {
+        let fill: NSColor
+        if AppPreferences.shared.theme != .system && alternatingTint {
+            fill = Palette.surfaceAlt
+        } else {
+            fill = Palette.surface
+        }
+        fill.setFill()
+        dirtyRect.fill()
+    }
     override func drawSelection(in dirtyRect: NSRect) {
         Palette.selected.setFill(); bounds.fill()
     }
@@ -293,7 +397,7 @@ final class PathBar: Surface, NSTextFieldDelegate {
     override init(frame: NSRect) {
         super.init(frame: frame)
         suggestions.onChoose = { [weak self] text in self?.chooseSuggestion(text) }
-        color = .controlBackgroundColor; wantsLayer = true; layer?.cornerRadius = 5
+        color = Palette.surface; wantsLayer = true; layer?.cornerRadius = 5
         layer?.borderWidth = 0.5; layer?.borderColor = Palette.line.cgColor
         crumbs.orientation = .horizontal; crumbs.spacing = 0
         field.isBordered = false; field.drawsBackground = false; field.font = .systemFont(ofSize: 12)
@@ -316,6 +420,11 @@ final class PathBar: Surface, NSTextFieldDelegate {
             return
         }
         beginEditing()
+    }
+    func refreshTheme() {
+        color = Palette.surface
+        layer?.borderColor = Palette.line.cgColor
+        needsDisplay = true
     }
     func update(_ url: URL, searchResults: String? = nil) {
         self.searchResults = searchResults

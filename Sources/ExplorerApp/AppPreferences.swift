@@ -70,6 +70,21 @@ final class AppPreferences {
         get { AppAppearance(rawValue: defaults.string(forKey: "explorer.appearance") ?? "") ?? .system }
         set { set(newValue.rawValue, for: "explorer.appearance") }
     }
+    var theme: AppTheme {
+        get { AppTheme(rawValue: defaults.string(forKey: "explorer.theme") ?? "") ?? .slateCyan }
+        set { set(newValue.rawValue, for: "explorer.theme") }
+    }
+    var effectiveAppearance: NSAppearance? {
+        theme.forcesDarkAppearance ? NSAppearance(named: .darkAqua) : appearance.appearance
+    }
+    var showPreviewPane: Bool {
+        get { defaults.object(forKey: "explorer.previewPane") as? Bool ?? true }
+        set { set(newValue, for: "explorer.previewPane") }
+    }
+    var calculateFolderSizes: Bool {
+        get { defaults.object(forKey: "explorer.calculateFolderSizes") as? Bool ?? true }
+        set { set(newValue, for: "explorer.calculateFolderSizes") }
+    }
     var viewMode: FileViewMode {
         get { FileViewMode(rawValue: defaults.string(forKey: "explorer.viewMode") ?? "") ?? .details }
         set { set(newValue.rawValue, for: "explorer.viewMode") }

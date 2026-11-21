@@ -67,6 +67,12 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
         super.viewDidLayout()
         if let scroll = outline.enclosingScrollView { outline.tableColumns.first?.width = max(100, scroll.contentSize.width - 2) }
     }
+    func refreshTheme() {
+        (view as? Surface)?.color = Palette.sidebar
+        outline.backgroundColor = Palette.sidebar
+        outline.reloadData()
+        if let selectedURL { sync(to: selectedURL) }
+    }
     @objc private func favoritesChanged() { rebuild(); if let selectedURL { sync(to: selectedURL) } }
     @objc private func volumesChanged() {
         let identity = StorageStore.shared.locations.map { $0.id + $0.title + $0.kind.rawValue }

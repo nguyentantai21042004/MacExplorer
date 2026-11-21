@@ -17,10 +17,11 @@ extension BrowserViewController {
             search.placeholderString = L10n.text("Search This Mac"); search.setAccessibilityLabel(L10n.text("Search drives and network locations"))
             search.toolTip = L10n.text("Filter drives and cloud folders by name or account"); return
         }
-        let recursive = tab.searchScope == .subfolders
+        let parsed = SearchQueryParser.parse(tab.query)
+        let recursive = tab.searchScope == .subfolders || parsed.contentQuery != nil
         search.placeholderString = L10n.text("Search %1$@", title(for: tab.history.current))
         search.setAccessibilityLabel(recursive ? L10n.text("Search folder and subfolders") : L10n.text("Filter this folder"))
-        search.toolTip = recursive ? L10n.text("Find names in %1$@ and its subfolders", tab.history.current.path) : L10n.text("Filter names in the current folder")
+        search.toolTip = L10n.text("Supports ext:go, size:>1mb, mod:<7d, type:folder, regex:..., content:...")
     }
 
     func searchOptionsMenu() -> NSMenu {
@@ -148,6 +149,7 @@ extension BrowserViewController {
     }
     func suspend() {
         closeQuickLook(); cancelSearchWork(); tab.loadTask?.cancel(); tab.sortTask?.cancel(); refreshTask?.cancel()
+        folderSizeTask?.cancel(); gitStatusTask?.cancel()
         watcher = nil; watcherURL = nil; watcherTabID = nil; cancelVisibleThumbnails(); tab.loading = false
     }
     @objc func openContainingFolder() {

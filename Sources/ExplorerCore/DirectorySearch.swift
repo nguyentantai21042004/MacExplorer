@@ -14,8 +14,9 @@ public enum DirectorySearch {
     /// but never descended into. This prevents cycles and surprises inside app bundles.
     public static func run(root: URL, query: String, showHidden: Bool = false, resultLimit: Int = 20_000,
                            onUpdate: @Sendable (SearchUpdate) async -> Void) async throws -> SearchUpdate {
-        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty, resultLimit > 0 else { return SearchUpdate(matches: [], scanned: 0, unreadableFolders: 0, reachedLimit: false) }
+        let filter = SearchQueryParser.parse(query)
+        guard !filter.isEmpty, resultLimit > 0 else { return SearchUpdate(matches: [], scanned: 0, unreadableFolders: 0, reachedLimit: false) }
+        let regex = filter.compiledRegex()
         try Task.checkCancellation()
         let searchRoot = URL(fileURLWithPath: root.resolvingSymlinksInPath().path, isDirectory: true)
         try FileSystem.validateDirectory(searchRoot)
@@ -34,7 +35,7 @@ public enum DirectorySearch {
                 try Task.checkCancellation()
                 guard showHidden || !item.isHidden else { continue }
                 scanned += 1
-                if item.name.localizedStandardContains(query) {
+                if filter.matchesMetadata(item, regex: regex) && matchesContent(item, needle: filter.contentQuery) {
                     batch.append(item); found += 1
                     if found >= resultLimit { limited = true; break scan }
                 }
@@ -49,6 +50,17 @@ public enum DirectorySearch {
         let final = SearchUpdate(matches: batch, scanned: scanned, unreadableFolders: unreadable, reachedLimit: limited)
         await onUpdate(final)
         return SearchUpdate(matches: [], scanned: scanned, unreadableFolders: unreadable, reachedLimit: limited)
+    }
+
+    private static func matchesContent(_ item: FileItem, needle: String?) -> Bool {
+        guard let needle, !needle.isEmpty else { return true }
+        guard !item.isDirectory, !item.isPackage, !item.isSymbolicLink else { return false }
+        if let size = item.size, size > 2_000_000 { return false }
+        guard let data = try? Data(contentsOf: item.url, options: [.mappedIfSafe]),
+              data.count <= 2_000_000,
+              !data.prefix(4096).contains(0),
+              let text = String(data: data, encoding: .utf8) else { return false }
+        return text.localizedStandardContains(needle)
     }
     public static func location(of item: URL, relativeTo root: URL) -> String {
         var parent = item.deletingLastPathComponent().standardizedFileURL.path, base = root.standardizedFileURL.path

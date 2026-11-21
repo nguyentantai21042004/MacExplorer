@@ -80,7 +80,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let languageInstall = NSButton(title: L10n.text("Install Language Packs…"), target: nil, action: nil)
     private let languageRestartControls = NSStackView()
     private let languageRestartNote = NSTextField(wrappingLabelWithString: L10n.text("Quit and reopen Explorer to apply the language change."))
-    private let startup = NSPopUpButton(), appearance = NSPopUpButton(), viewMode = NSPopUpButton(), scope = NSPopUpButton(), shortcutAction = NSPopUpButton()
+    private let startup = NSPopUpButton(), appearance = NSPopUpButton(), theme = NSPopUpButton(), viewMode = NSPopUpButton(), scope = NSPopUpButton(), shortcutAction = NSPopUpButton()
+    private let previewPane = NSButton(checkboxWithTitle: L10n.text("Show preview & inspector panel"), target: nil, action: nil)
+    private let calculateFolderSizes = NSButton(checkboxWithTitle: L10n.text("Calculate folder sizes in background"), target: nil, action: nil)
     private let terminalApplication = NSPopUpButton(), editorApplication = NSPopUpButton()
     private let folderDefaultButton = NSButton(title: L10n.text("Set as Default…"), target: nil, action: nil)
     private let folderDefaultStatus = NSTextField(wrappingLabelWithString: "")
@@ -157,18 +159,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         languageRestartNote.textColor = .secondaryLabelColor
         popup(startup, titles: StartupLocation.allCases.map(\.title), action: #selector(startupChanged), label: L10n.text("Open new windows to"))
         popup(appearance, titles: AppAppearance.allCases.map(\.title), action: #selector(appearanceChanged), label: L10n.text("Appearance"))
+        popup(theme, titles: AppTheme.allCases.map(\.title), action: #selector(themeChanged), label: L10n.text("Color theme"))
         popup(viewMode, titles: FileViewMode.allCases.map(\.title), action: #selector(viewChanged), label: L10n.text("Default folder view"))
         popup(scope, titles: [L10n.text("Current folder"), L10n.text("All subfolders")], action: #selector(scopeChanged), label: L10n.text("Default search scope"))
         hidden.target = self; hidden.action = #selector(hiddenChanged)
+        previewPane.target = self; previewPane.action = #selector(previewPaneChanged)
+        calculateFolderSizes.target = self; calculateFolderSizes.action = #selector(calculateFolderSizesChanged)
         launchAtLogin.target = self; launchAtLogin.action = #selector(loginChanged)
         launchAtLogin.isEnabled = !DemoData.active
         loginStatus.font = .systemFont(ofSize: 12); loginStatus.textColor = .secondaryLabelColor
         loginSettings.bezelStyle = .rounded; loginSettings.target = self; loginSettings.action = #selector(openLoginSettings)
         return page(L10n.text("Make Explorer yours"), subtitle: L10n.text("Changes are saved automatically."), content: [
-            row(L10n.text("Open new windows to"), control: startup), row(L10n.text("Appearance"), control: appearance),
+            row(L10n.text("Open new windows to"), control: startup), row(L10n.text("Color theme"), control: theme), row(L10n.text("Appearance"), control: appearance),
             row(L10n.text("Default folder view"), control: viewMode), row(L10n.text("Default search scope"), control: scope),
             row(L10n.text("Interface language"), control: language), languageRestartControls, languageRestartNote,
-            hidden, note(L10n.text("View and search defaults apply to new tabs. Existing tabs keep their layout; the View menu also updates the folder-view default.")),
+            hidden, previewPane, calculateFolderSizes, note(L10n.text("View and search defaults apply to new tabs. Existing tabs keep their layout; the View menu also updates the folder-view default.")),
             launchAtLogin, loginStatus, loginSettings
         ])
     }
@@ -336,10 +341,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     @objc private func refresh() {
         refreshLanguage()
         startup.selectItem(at: StartupLocation.allCases.firstIndex(of: preferences.startupLocation) ?? 0)
+        theme.selectItem(at: AppTheme.allCases.firstIndex(of: preferences.theme) ?? 0)
         appearance.selectItem(at: AppAppearance.allCases.firstIndex(of: preferences.appearance) ?? 0)
+        appearance.isEnabled = !preferences.theme.forcesDarkAppearance
         viewMode.selectItem(at: FileViewMode.allCases.firstIndex(of: preferences.viewMode) ?? 0)
         scope.selectItem(at: preferences.searchScope == .folder ? 0 : 1)
         hidden.state = preferences.showHidden ? .on : .off
+        previewPane.state = preferences.showPreviewPane ? .on : .off
+        calculateFolderSizes.state = preferences.calculateFolderSizes ? .on : .off
         shortcutEnabled.state = preferences.shortcutEnabled ? .on : .off
         shortcutAction.selectItem(at: preferences.shortcutOpensNewWindow ? 1 : 0)
         if !recorder.isRecording { recorder.title = preferences.shortcut.title; updateShortcutStatus() }
@@ -469,10 +478,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func applyLanguage() { onLanguageRestart?() }
     @objc private func startupChanged() { preferences.startupLocation = StartupLocation.allCases[startup.indexOfSelectedItem] }
+    @objc private func themeChanged() { preferences.theme = AppTheme.allCases[theme.indexOfSelectedItem] }
     @objc private func appearanceChanged() { preferences.appearance = AppAppearance.allCases[appearance.indexOfSelectedItem] }
     @objc private func viewChanged() { preferences.viewMode = FileViewMode.allCases[viewMode.indexOfSelectedItem] }
     @objc private func scopeChanged() { preferences.searchScope = scope.indexOfSelectedItem == 0 ? .folder : .subfolders }
     @objc private func hiddenChanged() { preferences.showHidden = hidden.state == .on }
+    @objc private func previewPaneChanged() { preferences.showPreviewPane = previewPane.state == .on }
+    @objc private func calculateFolderSizesChanged() { preferences.calculateFolderSizes = calculateFolderSizes.state == .on }
     @objc private func shortcutActionChanged() { preferences.shortcutOpensNewWindow = shortcutAction.indexOfSelectedItem == 1 }
     @objc private func loginChanged() {
         do {

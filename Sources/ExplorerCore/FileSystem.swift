@@ -40,8 +40,10 @@ public struct FileSort: Sendable, Equatable, Codable {
     }
 
     public func apply(to items: [FileItem], query: String = "", showHidden: Bool = false) -> [FileItem] {
+        let filter = SearchQueryParser.parse(query)
+        let regex = filter.compiledRegex()
         let visible = items.filter {
-            (showHidden || !$0.isHidden) && (query.isEmpty || $0.name.localizedStandardContains(query))
+            (showHidden || !$0.isHidden) && (filter.isEmpty || filter.matchesMetadata($0, regex: regex))
         }
         return visible.sorted { a, b in
             // Folders stay first, even when descending.

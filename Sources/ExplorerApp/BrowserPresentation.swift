@@ -9,7 +9,7 @@ extension BrowserViewController: NSCollectionViewDataSource, NSCollectionViewDel
         iconLayout.minimumInteritemSpacing = 6; iconLayout.minimumLineSpacing = 6
         collection.collectionViewLayout = iconLayout
         collection.isSelectable = true; collection.allowsMultipleSelection = true
-        collection.backgroundColors = [.controlBackgroundColor]
+        collection.backgroundColors = [Palette.surface]
         collection.register(FileIconItem.self, forItemWithIdentifier: FileIconItem.identifier)
         collection.register(FileGroupHeader.self, forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader, withIdentifier: FileGroupHeader.identifier)
         collection.dataSource = self; collection.delegate = self
@@ -156,6 +156,7 @@ extension BrowserViewController: NSCollectionViewDataSource, NSCollectionViewDel
     func iconSelectionChanged() {
         guard !suppressSelection else { return }
         rememberSelection(); updateStatus()
+        workspace?.updateInspector(from: self)
         // AppKit reports deselection before the replacement selection. Preview the
         // final selection after the event, without briefly closing the panel.
         Task { @MainActor [weak self] in self?.updateQuickLookSelection() }

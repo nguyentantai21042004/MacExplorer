@@ -23,7 +23,7 @@ final class BrowserTab {
     var searchStopped = false
     var isThisMac: Bool { BrowserLocation.isThisMac(history.current) }
     var hasSearchQuery: Bool { !isThisMac && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var isRecursiveSearch: Bool { hasSearchQuery && searchScope == .subfolders }
+    var isRecursiveSearch: Bool { hasSearchQuery && (searchScope == .subfolders || SearchQueryParser.parse(query).contentQuery != nil) }
     var searchViewMode = FileViewMode.content
     var selectionKey: String { history.current.path + (hasSearchQuery ? "\nsearch:" + searchScope.rawValue + ":" + query : "") }
     var sort = FileSort()
@@ -92,6 +92,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     let viewPicker = FlatMenuButton(frame: .zero, pullsDown: true)
     let sortPicker = FlatMenuButton(frame: .zero, pullsDown: true)
     var previewButton: ActionButton!
+    var previewPaneButton: ActionButton!
     var previewURLs: [NSURL] = []
     var tabChips: [UUID: BrowserTabView] = [:]
     var viewMode: FileViewMode { tab.hasSearchQuery ? tab.searchViewMode : tab.viewMode }
@@ -99,6 +100,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     var activeScroll: NSScrollView { viewMode.usesTable ? tableScroll : collectionScroll }
     var scrollKey: String { tab.selectionKey + "|" + viewMode.rawValue + "|" + tab.grouping.key.rawValue }
     let status = NSTextField(labelWithString: "")
+    let gitBadge = NSTextField(labelWithString: "")
     let detail = NSTextField(labelWithString: "")
     let progress = NSProgressIndicator()
     let emptyStack = NSStackView()
@@ -114,6 +116,14 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     var watcherURL: URL?
     var watcherTabID: UUID?
     var refreshTask: Task<Void, Never>?
+    var folderSizes: [String: FolderSizeResult] = [:]
+    var folderBranches: [String: String] = [:]
+    var folderSizeTask: Task<Void, Never>?
+    var gitStatusTask: Task<Void, Never>?
+    private var batchRenameSheet: BatchRenameSheetController?
+    private weak var commandBarSurface: Surface?
+    private weak var footerSurface: Surface?
+    private weak var fileAreaSurface: Surface?
     var suppressSelection = false
     let iconCache = NSCache<NSString, NSImage>()
     let dateFormatter: DateFormatter = {
@@ -143,7 +153,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
 
     override func loadView() {
         let root = Surface(frame: NSRect(x: 0, y: 0, width: 1160, height: 760))
-        root.color = .controlBackgroundColor; view = root
+        root.color = Palette.surface; view = root
         iconCache.countLimit = 600
         _ = buildTabsBar()
         let navigation = buildNavigationBar(), footer = buildFooter()
@@ -222,7 +232,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     func buildCommandBar() -> NSView {
-        let bar = Surface(); bar.color = .controlBackgroundColor; bar.border = true
+        let bar = Surface(); bar.color = Palette.surface; bar.border = true; commandBarSurface = bar
         func button(_ action: FileAction, _ symbol: String, _ tooltip: String, title: String = "") -> ActionButton {
             let button = ActionButton(title, symbol: symbol, tooltip: tooltip) { [weak self] in self?.performFileAction(action) }
             operationButtons[action] = button; return button
@@ -238,6 +248,8 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         let cancel = button(.cancel, "xmark.circle", L10n.text("Cancel operation or pending cut (Escape)"))
         hiddenButton = ActionButton(symbol: "eye.slash", tooltip: L10n.text("Show hidden files (⇧⌘.)")) { [weak self] in self?.toggleHidden() }
         previewButton = ActionButton(symbol: "eye", tooltip: L10n.text("Quick Look (Space)")) { [weak self] in self?.toggleQuickLook() }
+        previewPaneButton = ActionButton(symbol: "sidebar.right", tooltip: L10n.text("Toggle preview panel (⌥⌘P)")) { [weak self] in self?.workspace?.togglePreviewPane() }
+        previewPaneButton.active = AppPreferences.shared.showPreviewPane
         viewPicker.menu = presentationMenu(); viewPicker.font = .systemFont(ofSize: 12)
         viewPicker.setAccessibilityLabel(L10n.text("View options")); viewPicker.widthAnchor.constraint(equalToConstant: 86).isActive = true
         viewPicker.menu?.items.first?.image = Palette.buttonSymbol("list.bullet", size: 14, canvas: 18)
@@ -248,7 +260,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         searchOptions.toolTip = L10n.text("Search options: current folder, subfolders, and stop search")
         searchOptionsWidth = searchOptions.widthAnchor.constraint(equalToConstant: 132); searchOptionsWidth?.isActive = true
         closeSearchButton = ActionButton(symbol: "xmark", tooltip: L10n.text("Close search")) { [weak self] in self?.closeSearch() }
-        closeSearchButton.contentTintColor = .systemBlue
+        closeSearchButton.contentTintColor = Palette.accent
         closeSearchWidth = closeSearchButton.constraints.first { $0.firstAttribute == .width }
         let left = NSStackView(views: [new, separator(), cut, copy, paste, rename, move, trash, separator(), undo, cancel, separator(), sortPicker, viewPicker, searchOptions, closeSearchButton!]); left.spacing = 4
         bar.onLayout = { [weak self, weak bar] in self?.layoutSearchTools(width: bar?.bounds.width ?? 0) }
@@ -257,7 +269,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         copyOtherButton = ActionButton(symbol: "doc.on.doc.fill", tooltip: L10n.text("Copy selection to other pane (⌃⇧C)")) { [weak self] in self?.transferToOtherPane(move: false) }
         moveOtherButton = ActionButton(symbol: "arrow.left.arrow.right", tooltip: L10n.text("Move selection to other pane (⌃⇧M)")) { [weak self] in self?.transferToOtherPane(move: true) }
         copyOtherButton.isHidden = true; moveOtherButton.isHidden = true
-        let right = NSStackView(views: [copyOtherButton!, moveOtherButton!, previewButton!, pinButton!, dualButton!, hiddenButton!]); right.spacing = 4
+        let right = NSStackView(views: [copyOtherButton!, moveOtherButton!, previewButton!, previewPaneButton!, pinButton!, dualButton!, hiddenButton!]); right.spacing = 4
         for child in [left, right] { bar.addSubview(child); child.translatesAutoresizingMaskIntoConstraints = false }
         NSLayoutConstraint.activate([
             left.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 14), left.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
@@ -300,14 +312,17 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         NSLayoutConstraint.activate(compact ? navigationNarrow : navigationWide); compactNavigation = compact
     }
     func buildFooter() -> NSView {
-        let bar = Surface(); bar.color = .controlBackgroundColor
+        let bar = Surface(); bar.color = Palette.surface; footerSurface = bar
         for label in [status, detail] { label.font = .systemFont(ofSize: 11); label.textColor = .secondaryLabelColor; label.lineBreakMode = .byTruncatingMiddle }
+        gitBadge.font = .systemFont(ofSize: 11, weight: .medium); gitBadge.textColor = Palette.accent; gitBadge.isHidden = true
         progress.style = .spinning; progress.controlSize = .small; progress.isDisplayedWhenStopped = false
-        for child in [progress, status, detail] { bar.addSubview(child); child.translatesAutoresizingMaskIntoConstraints = false }
+        for child in [progress, status, gitBadge, detail] { bar.addSubview(child); child.translatesAutoresizingMaskIntoConstraints = false }
         NSLayoutConstraint.activate([
             progress.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 10), progress.centerYAnchor.constraint(equalTo: bar.centerYAnchor), progress.widthAnchor.constraint(equalToConstant: 14), progress.heightAnchor.constraint(equalToConstant: 14),
             status.leadingAnchor.constraint(equalTo: progress.trailingAnchor, constant: 7), status.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            detail.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -16), detail.centerYAnchor.constraint(equalTo: bar.centerYAnchor), status.trailingAnchor.constraint(lessThanOrEqualTo: detail.leadingAnchor, constant: -15)
+            gitBadge.trailingAnchor.constraint(equalTo: detail.leadingAnchor, constant: -12), gitBadge.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            detail.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -16), detail.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: gitBadge.leadingAnchor, constant: -12)
         ])
         return bar
     }
@@ -317,7 +332,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         tableScroll.contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(contentTableResized(_:)), name: NSView.frameDidChangeNotification, object: tableScroll.contentView)
         table.rowHeight = 29; table.floatsGroupRows = false; table.intercellSpacing = NSSize(width: 0, height: 1)
-        table.backgroundColor = .controlBackgroundColor; table.usesAlternatingRowBackgroundColors = false
+        table.backgroundColor = Palette.surface; table.usesAlternatingRowBackgroundColors = false
         table.style = .plain; table.selectionHighlightStyle = .regular
         table.allowsMultipleSelection = true; table.allowsEmptySelection = true; table.allowsTypeSelect = true
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
@@ -347,10 +362,10 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         table.canFileAction = { [weak self] in self?.canPerformFileAction($0) == true }
         let menu = NSMenu(); menu.delegate = self; table.menu = menu
         tableScroll.documentView = table; tableScroll.hasVerticalScroller = true; tableScroll.hasHorizontalScroller = true
-        tableScroll.autohidesScrollers = true; tableScroll.drawsBackground = true; tableScroll.backgroundColor = .controlBackgroundColor
+        tableScroll.autohidesScrollers = true; tableScroll.drawsBackground = true; tableScroll.backgroundColor = Palette.surface
     }
     func buildFileArea() -> NSView {
-        let area = FolderDropSurface(); area.color = .controlBackgroundColor
+        let area = FolderDropSurface(); area.color = Palette.surface; fileAreaSurface = area
         area.dropDestination = { [weak self] in self?.folderDestination }
         for scroll in [tableScroll, collectionScroll, thisMacView] {
             scroll.translatesAutoresizingMaskIntoConstraints = false; area.addSubview(scroll)
@@ -537,6 +552,8 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         let tab = self.tab, url = tab.history.current
         let isGoogleDriveShortcut = StorageStore.shared.isGoogleDriveShortcut(url)
         tab.loadTask?.cancel(); tab.sortTask?.cancel(); refreshTask?.cancel()
+        folderSizeTask?.cancel(); gitStatusTask?.cancel()
+        folderSizes = [:]; folderBranches = [:]; gitBadge.isHidden = true
         tab.generation = UUID(); let generation = tab.generation
         tab.error = nil; tab.loading = true; tab.changedDuringLoad = false
         // Attach without blocking the UI; the watcher reconciles once it is ready.
@@ -561,6 +578,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
                 guard !Task.isCancelled, let self, let tab, tab.generation == generation, self.tab === tab else { return }
                 tab.items = items; tab.loading = false
                 self.applyView()
+                self.startFolderMetadataEnrichment(for: items, currentFolder: url, generation: generation)
                 if tab.changedDuringLoad { self.scheduleRefresh() }
             } catch {
                 guard !Task.isCancelled, let self, let tab, tab.generation == generation, self.tab === tab else { return }
@@ -678,8 +696,18 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
             }
         case "modified": cell.textField?.stringValue = item.modified.map(dateFormatter.string) ?? "—"
         case "created": cell.textField?.stringValue = item.created.map(dateFormatter.string) ?? "—"
-        case "kind": cell.textField?.stringValue = item.kind
-        case "size": cell.textField?.stringValue = item.size.map { L10n.byteCount($0) } ?? "—"
+        case "kind":
+            if item.isNavigable, let branch = folderBranches[item.id] {
+                cell.textField?.stringValue = "\(item.kind) · \(branch)"
+            } else {
+                cell.textField?.stringValue = item.kind
+            }
+        case "size":
+            if item.isNavigable {
+                cell.textField?.stringValue = folderSizes[item.id].map { L10n.byteCount($0.bytes) } ?? "—"
+            } else {
+                cell.textField?.stringValue = item.size.map { L10n.byteCount($0) } ?? "—"
+            }
         default: break
         }
         cell.toolTip = column.identifier.rawValue == "name" ? [item.url.path, FileColors.description(item.finderColors)].filter { !$0.isEmpty }.joined(separator: "\n") : cell.textField?.stringValue
@@ -701,7 +729,9 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo: leading, constant: 9), label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -12), label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)])
         return cell
     }
-    func tableViewSelectionDidChange(_ notification: Notification) { if !suppressSelection { rememberSelection(); updateStatus(); updateQuickLookSelection() } }
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        if !suppressSelection { rememberSelection(); updateStatus(); updateQuickLookSelection(); workspace?.updateInspector(from: self) }
+    }
     func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
         guard isViewLoaded, !suppressSelection, let descriptor = tableView.sortDescriptors.first,
               let key = descriptor.key.flatMap(FileSortKey.init(rawValue:)) else { return }
@@ -740,6 +770,9 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         }
         if let item = items.first {
             add(L10n.text("Open"), item.isNavigable ? "folder" : "doc") { [weak self] in self?.contextOpen() }
+            if items.count > 1 {
+                add(L10n.text("Batch Rename…"), "character.cursor.ibeam") { [weak self] in self?.performFileAction(.rename) }
+            }
             if items.allSatisfy({ !$0.isNavigable }) {
                 menu.addItem(OpenWithMenu.item(urls: items.map(\.url), window: view.window))
             }
@@ -830,7 +863,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         case .compress: return !selectedItems.isEmpty
         case .extract: return canExtractSelection
         case .properties: return false
-        case .rename: return selectedItems.count == 1
+        case .rename: return !selectedItems.isEmpty
         case .newFolder, .newFile: return folderDestination != nil
         case .paste: return folderDestination != nil && operations.canPaste
         case .undo: return operations.undoTitle != nil
@@ -867,6 +900,17 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
             let targets = tab.isThisMac ? [thisMacView.selectedLocation?.url].compactMap { $0 } : (!urls.isEmpty ? urls : [folder])
             FileProperties.show(targets, window: window)
         case .rename:
+            if selectedItems.count > 1 {
+                let sheet = BatchRenameSheetController(urls: selectedItems.map(\.url)) { [weak self] pairs in
+                    self?.batchRenameSheet = nil
+                    self?.operations.run(.batchRename(pairs), window: window)
+                }
+                batchRenameSheet = sheet
+                if let sheetWindow = sheet.window {
+                    window.beginSheet(sheetWindow) { [weak self] _ in self?.batchRenameSheet = nil }
+                }
+                return
+            }
             guard let item = selectedItems.first else { return }
             let title = L10n.text("Rename")
             operations.askName(title: title, submitTitle: title, initial: item.name, selectStem: !item.isDirectory, window: window) { [weak self] name in
@@ -925,4 +969,171 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     @objc private func contextNewTab() { openSelected(inNewTab: true) }
     @objc private func contextPackage() { if let item = selectedItems.first { navigate(item.url) } }
     @objc private func contextCopy() { copySelectedPaths() }
+
+    func refreshTheme() {
+        guard isViewLoaded else { return }
+        (view as? Surface)?.color = Palette.surface
+        commandBarSurface?.color = Palette.surface
+        footerSurface?.color = Palette.surface
+        fileAreaSurface?.color = Palette.surface
+        headerView.color = Palette.navigation
+        paneHeader?.color = Palette.chrome
+        table.backgroundColor = Palette.surface
+        tableScroll.backgroundColor = Palette.surface
+        collection.backgroundColors = [Palette.surface]
+        thisMacView.refreshTheme()
+        gitBadge.textColor = Palette.accent
+        closeSearchButton?.contentTintColor = Palette.accent
+        pathBar.refreshTheme()
+        search.needsDisplay = true
+        table.reloadData()
+        configureVisibleIcons()
+        paneHeader?.needsDisplay = true
+        view.needsDisplay = true
+    }
+
+    func applyFolderSizePreference() {
+        guard isViewLoaded else { return }
+        if AppPreferences.shared.calculateFolderSizes {
+            if !tab.isThisMac && !tab.isRecursiveSearch {
+                startFolderMetadataEnrichment(for: tab.items, currentFolder: tab.history.current, generation: tab.generation)
+            }
+        } else {
+            folderSizeTask?.cancel()
+            folderSizes = [:]
+            table.reloadData()
+        }
+    }
+
+    func startFolderMetadataEnrichment(for items: [FileItem], currentFolder: URL, generation: UUID) {
+        folderSizeTask?.cancel()
+        gitStatusTask?.cancel()
+
+        gitStatusTask = Task { [weak self, weak tab] in
+            let status = await GitRepoReader.readStatus(for: currentFolder)
+            let branches = await Task.detached(priority: .utility) {
+                var map: [String: String] = [:]
+                for item in items where item.isNavigable && !item.isSymbolicLink {
+                    if let branch = GitRepoReader.readBranchFast(at: item.url) {
+                        map[item.id] = branch
+                    }
+                }
+                return map
+            }.value
+            guard !Task.isCancelled, let self, let tab, self.tab === tab, tab.generation == generation else { return }
+            if let status {
+                self.gitBadge.stringValue = "git: \(status.badgeText)"
+                self.gitBadge.textColor = status.isClean ? Palette.accent : .systemOrange
+                self.gitBadge.isHidden = false
+            } else {
+                self.gitBadge.isHidden = true
+            }
+            if !branches.isEmpty {
+                self.folderBranches = branches
+                if self.viewMode == .details, let kindCol = self.table.column(withIdentifier: NSUserInterfaceItemIdentifier("kind")) as Int?, kindCol >= 0, self.table.numberOfRows > 0 {
+                    self.table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<self.table.numberOfRows), columnIndexes: IndexSet(integer: kindCol))
+                }
+            }
+        }
+
+        guard AppPreferences.shared.calculateFolderSizes else { return }
+        let folders = items.filter { $0.isNavigable && !$0.isSymbolicLink && (self.showHidden || !$0.isHidden) }
+        guard !folders.isEmpty else { return }
+
+        folderSizeTask = Task { [weak self, weak tab] in
+            for folder in folders {
+                guard !Task.isCancelled else { return }
+                let cached = await FolderSizeCache.shared.cached(for: folder.url, modified: folder.modified)
+                let measured: FolderSizeResult?
+                if let cached {
+                    measured = cached
+                } else {
+                    let target = folder.url
+                    measured = await Task.detached(priority: .utility) { try? FolderSizeCalculator.measure(target) }.value
+                    if let measured {
+                        await FolderSizeCache.shared.store(measured, for: folder.url, modified: folder.modified)
+                    }
+                }
+                guard !Task.isCancelled, let measured, let self, let tab, self.tab === tab, tab.generation == generation else { return }
+                self.folderSizes[folder.id] = measured
+                if self.viewMode == .details,
+                   let idx = tab.visible.firstIndex(where: { $0.id == folder.id }),
+                   let row = tab.displayIndex.row(forItem: idx) {
+                    let sizeCol = self.table.column(withIdentifier: NSUserInterfaceItemIdentifier("size"))
+                    if sizeCol >= 0, row < self.table.numberOfRows {
+                        self.table.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: sizeCol))
+                    }
+                }
+                self.workspace?.updateInspector(from: self)
+            }
+        }
+    }
+
+    func showQuickJump() {
+        guard let window = view.window, window.attachedSheet == nil else { return }
+        var items: [QuickJumpItem] = []
+
+        for t in tabs {
+            let url = t.history.current
+            items.append(QuickJumpItem(
+                title: tabTitle(t),
+                subtitle: L10n.text("Open Tab · %1$@", url.path),
+                symbol: "macwindow",
+                execute: { _ in .switchTab(t.id) }
+            ))
+        }
+        for fav in FavoriteStore.shared.favorites.items {
+            items.append(QuickJumpItem(
+                title: fav.name,
+                subtitle: L10n.text("Favorite · %1$@", fav.path),
+                symbol: "pin.fill",
+                execute: { newTab in .navigate(fav.url, newTab: newTab) }
+            ))
+        }
+        for child in tab.items where child.isNavigable && (showHidden || !child.isHidden) {
+            items.append(QuickJumpItem(
+                title: child.name,
+                subtitle: L10n.text("Folder · %1$@", child.url.path),
+                symbol: "folder",
+                execute: { newTab in .navigate(child.url, newTab: newTab) }
+            ))
+        }
+
+        items.append(QuickJumpItem(title: L10n.text("Toggle Dual Pane"), subtitle: "⇧⌘D", symbol: "rectangle.split.2x1", execute: { _ in .toggleDualPane }))
+        items.append(QuickJumpItem(title: L10n.text("Toggle Preview Panel"), subtitle: "⌥⌘P", symbol: "sidebar.right", execute: { _ in .togglePreviewPane }))
+        items.append(QuickJumpItem(title: L10n.text("Toggle Folder Sizes"), subtitle: "Real-time calculation", symbol: "internaldrive", execute: { _ in .toggleFolderSizes }))
+        if selectedItems.count > 1 {
+            items.append(QuickJumpItem(title: L10n.text("Batch Rename…"), subtitle: "\(selectedItems.count) items", symbol: "character.cursor.ibeam", execute: { _ in .batchRename }))
+        }
+        if let dir = ExternalApplications.terminalDirectory(items: selectedItems, currentFolder: tab.history.current) {
+            items.append(QuickJumpItem(title: L10n.text("Open in %1$@", ExternalApplications.name(for: .terminal)), subtitle: dir.path, symbol: "terminal", execute: { _ in .openTerminal }))
+        }
+        for theme in AppTheme.allCases {
+            items.append(QuickJumpItem(title: "Theme: \(theme.title)", subtitle: L10n.text("Appearance"), symbol: "paintpalette", execute: { _ in .setTheme(theme) }))
+        }
+
+        QuickJumpPanelController.shared.show(in: window, items: items) { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case let .navigate(url, newTab):
+                if newTab { self.newTab(url: url) } else { self.navigate(url) }
+            case let .switchTab(id):
+                self.activateTab(id: id)
+            case .toggleDualPane:
+                self.workspace?.toggleDualPane()
+            case .togglePreviewPane:
+                self.workspace?.togglePreviewPane()
+            case .toggleFolderSizes:
+                AppPreferences.shared.calculateFolderSizes.toggle()
+            case .batchRename:
+                self.performFileAction(.rename)
+            case .openTerminal:
+                if let dir = ExternalApplications.terminalDirectory(items: self.selectedItems, currentFolder: self.tab.history.current) {
+                    ExternalApplications.openTerminal(at: dir, window: self.view.window)
+                }
+            case let .setTheme(theme):
+                AppPreferences.shared.theme = theme
+            }
+        }
+    }
 }

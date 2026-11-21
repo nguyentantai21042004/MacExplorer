@@ -1,4 +1,5 @@
 import AppKit
+import ExplorerCore
 
 @MainActor
 enum SearchHighlight {
@@ -12,11 +13,12 @@ enum SearchHighlight {
     /// Use the same localized matching as filename search, without converting
     /// the displayed text to lowercase or losing its original Unicode ranges.
     static func ranges(in text: String, query: String) -> [NSRange] {
-        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return [] }
+        let parsed = SearchQueryParser.parse(query)
+        let needle = parsed.hasAdvancedTokens ? parsed.highlightText : query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return [] }
         var ranges: [NSRange] = [], start = text.startIndex
         while start < text.endIndex,
-              let match = text[start...].localizedStandardRange(of: query), !match.isEmpty {
+              let match = text[start...].localizedStandardRange(of: needle), !match.isEmpty {
             ranges.append(NSRange(match, in: text))
             start = match.upperBound
         }

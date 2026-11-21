@@ -127,7 +127,7 @@ final class ThisMacView: NSView, NSCollectionViewDataSource, NSCollectionViewDel
     override init(frame: NSRect) {
         super.init(frame: frame)
         collection.collectionViewLayout = flow; collection.isSelectable = true
-        collection.backgroundColors = [.controlBackgroundColor]; collection.autoresizingMask = [.width]
+        collection.backgroundColors = [Palette.surface]; collection.autoresizingMask = [.width]
         collection.dataSource = self; collection.delegate = self
         collection.register(StorageCard.self, forItemWithIdentifier: StorageCard.identifier)
         collection.register(FileGroupHeader.self, forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader, withIdentifier: FileGroupHeader.identifier)
@@ -155,6 +155,10 @@ final class ThisMacView: NSView, NSCollectionViewDataSource, NSCollectionViewDel
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layout() { super.layout(); flow.invalidateLayout() }
+    func refreshTheme() {
+        collection.backgroundColors = [Palette.surface]
+        collection.reloadData()
+    }
     func update(_ locations: [StorageLocation], query: String, loading: Bool) {
         self.query = query
         let selected = selectedLocation?.id

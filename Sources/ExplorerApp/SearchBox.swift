@@ -60,11 +60,11 @@ final class SearchBox: Surface, NSTextFieldDelegate {
     override func mouseDown(with event: NSEvent) { focus() }
     override func draw(_ dirtyRect: NSRect) {
         let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 5, yRadius: 5)
-        NSColor.controlBackgroundColor.setFill(); shape.fill()
+        Palette.surface.setFill(); shape.fill()
         Palette.line.setStroke(); shape.lineWidth = 0.5; shape.stroke()
         if editing {
             NSGraphicsContext.saveGraphicsState(); shape.addClip()
-            NSColor.systemBlue.setFill(); NSRect(x: 0, y: bounds.height - 2, width: bounds.width, height: 2).fill()
+            Palette.accent.setFill(); NSRect(x: 0, y: bounds.height - 2, width: bounds.width, height: 2).fill()
             NSGraphicsContext.restoreGraphicsState()
         }
     }

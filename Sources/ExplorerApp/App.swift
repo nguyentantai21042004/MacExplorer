@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DemoData.configure()
         PreferenceMigration.run()
-        NSApp.appearance = AppPreferences.shared.appearance.appearance
+        NSApp.appearance = AppPreferences.shared.effectiveAppearance
         if let icon = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") { NSApp.applicationIconImage = NSImage(contentsOf: icon) }
         buildMenu()
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: AppPreferences.changed, object: AppPreferences.shared)
@@ -159,10 +159,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         about?.showWindow(nil); about?.window?.makeKeyAndOrderFront(nil)
     }
     @objc private func preferencesChanged() {
-        NSApp.appearance = AppPreferences.shared.appearance.appearance
+        NSApp.appearance = AppPreferences.shared.effectiveAppearance
         for controller in windows {
             controller.workspace.left.applyHiddenPreference()
             controller.workspace.right?.applyHiddenPreference()
+            controller.workspace.left.applyFolderSizePreference()
+            controller.workspace.right?.applyFolderSizePreference()
+            controller.workspace.syncPreviewPanePreference()
+            controller.workspace.refreshTheme()
         }
     }
 
@@ -214,6 +218,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func filter(_ sender: Any?) { current?.browser.focusFilter() }
     @objc func recursiveSearch(_ sender: Any?) { current?.browser.focusRecursiveSearch() }
     @objc func toggleDual(_ sender: Any?) { current?.workspace.toggleDualPane() }
+    @objc func togglePreviewPanel(_ sender: Any?) { current?.workspace.togglePreviewPane() }
+    @objc func toggleFolderSizes(_ sender: Any?) { AppPreferences.shared.calculateFolderSizes.toggle() }
+    @objc func quickJump(_ sender: Any?) { current?.browser.showQuickJump() }
+    @objc func selectTheme(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String, let theme = AppTheme(rawValue: raw) {
+            AppPreferences.shared.theme = theme
+        }
+    }
     @objc func otherPane(_ sender: Any?) { current?.workspace.focusOtherPane() }
     @objc func pinFolder(_ sender: Any?) { current?.browser.togglePin() }
     @objc func copyOther(_ sender: Any?) { current?.browser.transferToOtherPane(move: false) }
@@ -240,6 +252,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return current?.browser.canPerformFileAction(action) == true
         }
         if item.action == #selector(toggleDual) { item.state = current?.workspace.dualPane == true ? .on : .off }
+        if item.action == #selector(togglePreviewPanel) { item.state = AppPreferences.shared.showPreviewPane ? .on : .off }
+        if item.action == #selector(toggleFolderSizes) { item.state = AppPreferences.shared.calculateFolderSizes ? .on : .off }
+        if item.action == #selector(selectTheme) { item.state = (item.representedObject as? String) == AppPreferences.shared.theme.rawValue ? .on : .off; return true }
         if item.action == #selector(otherPane) { return current?.workspace.dualPane == true }
         if item.action == #selector(copyOther), let current { return !(NSApp.keyWindow?.firstResponder is NSTextView) && current.workspace.canTransfer(from: current.browser, move: false) }
         if item.action == #selector(moveOther), let current { return !(NSApp.keyWindow?.firstResponder is NSTextView) && current.workspace.canTransfer(from: current.browser, move: true) }
@@ -315,9 +330,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         view.addItem(.separator())
         add(view, L10n.text("Quick Look"), #selector(preview))
+        add(view, L10n.text("Preview Panel"), #selector(togglePreviewPanel), "p", [.command, .option])
         view.addItem(.separator())
         add(view, L10n.text("Refresh"), #selector(refresh), "r")
         add(view, L10n.text("Show Hidden Files"), #selector(hidden), ".", [.command, .shift])
+        add(view, L10n.text("Calculate Folder Sizes"), #selector(toggleFolderSizes))
+        let themeItem = NSMenuItem(title: L10n.text("Theme"), action: nil, keyEquivalent: "")
+        let themeMenu = NSMenu(title: L10n.text("Theme"))
+        for t in AppTheme.allCases {
+            let item = NSMenuItem(title: t.title, action: #selector(selectTheme), keyEquivalent: "")
+            item.target = self; item.representedObject = t.rawValue
+            themeMenu.addItem(item)
+        }
+        themeItem.submenu = themeMenu
+        view.addItem(themeItem)
         add(view, L10n.text("Search"), #selector(filter), "f")
         add(view, L10n.text("Search Subfolders"), #selector(recursiveSearch), "f", [.command, .shift])
         view.addItem(.separator())
@@ -335,6 +361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         add(go, L10n.text("Home"), #selector(home), "h", [.command, .shift])
         add(go, L10n.text("This Mac"), #selector(thisMac), "e", [.command, .shift])
         go.addItem(.separator())
+        add(go, L10n.text("Quick Jump…"), #selector(quickJump), "k")
         add(go, L10n.text("Open Containing Folder"), #selector(containingFolder), "r", [.command, .shift])
         add(go, L10n.text("Go to Path…"), #selector(editPath), "l")
         let window = submenu(L10n.text("Window"))
