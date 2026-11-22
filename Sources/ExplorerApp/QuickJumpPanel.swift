@@ -25,8 +25,8 @@ struct QuickJumpItem {
 final class QuickJumpPanelController: NSObject, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     static let shared = QuickJumpPanelController()
 
-    private var allItems: [QuickJumpItem] = []
-    private var filtered: [QuickJumpItem] = []
+    var allItems: [QuickJumpItem] = []
+    var filtered: [QuickJumpItem] = []
     private var handler: ((QuickJumpAction) -> Void)?
     private weak var hostWindow: NSWindow?
 
@@ -104,8 +104,8 @@ final class QuickJumpPanelController: NSObject, NSTextFieldDelegate, NSTableView
         return p
     }()
 
-    private let searchField = NSTextField()
-    private let table = NSTableView()
+    let searchField = NSTextField()
+    let table = NSTableView()
 
     func show(in window: NSWindow, items: [QuickJumpItem], onSelect: @escaping (QuickJumpAction) -> Void) {
         self.allItems = items
@@ -181,7 +181,7 @@ final class QuickJumpPanelController: NSObject, NSTextFieldDelegate, NSTableView
         }
     }
 
-    @objc private func commitSelection() {
+    @objc func commitSelection() {
         let row = table.selectedRow >= 0 ? table.selectedRow : 0
         guard filtered.indices.contains(row) else { hide(); return }
         let newTab = NSApp.currentEvent?.modifierFlags.contains(.command) == true

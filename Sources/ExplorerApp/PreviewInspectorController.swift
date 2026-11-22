@@ -12,12 +12,12 @@ final class PreviewInspectorController: NSViewController {
     private let surface = Surface()
     private let scroll = NSScrollView()
     private let contentStack = NSStackView()
-    private let previewContainer = Surface()
-    private let previewImage = NSImageView()
-    private let textScroll = NSScrollView()
-    private let textView = NSTextView()
-    private let titleLabel = NSTextField(wrappingLabelWithString: "")
-    private let subtitleLabel = NSTextField(labelWithString: "")
+    let previewContainer = Surface()
+    let previewImage = NSImageView()
+    let textScroll = NSScrollView()
+    let textView = NSTextView()
+    let titleLabel = NSTextField(wrappingLabelWithString: "")
+    let subtitleLabel = NSTextField(labelWithString: "")
     private let tagsStack = NSStackView()
     private let metaStack = NSStackView()
     private let actionsStack = NSStackView()
@@ -62,7 +62,8 @@ final class PreviewInspectorController: NSViewController {
             scroll.bottomAnchor.constraint(equalTo: surface.bottomAnchor)
         ])
 
-        let doc = NSView()
+        let doc = Surface()
+        doc.color = .clear
         doc.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = doc
 
@@ -78,7 +79,7 @@ final class PreviewInspectorController: NSViewController {
             contentStack.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
             contentStack.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
             contentStack.topAnchor.constraint(equalTo: doc.topAnchor),
-            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: doc.bottomAnchor)
+            contentStack.bottomAnchor.constraint(equalTo: doc.bottomAnchor)
         ])
 
         previewContainer.color = Palette.surface
@@ -245,7 +246,7 @@ final class PreviewInspectorController: NSViewController {
         var rows: [(String, String)] = []
         let sizeText: String
         if item.isNavigable {
-            sizeText = cachedFolderSize.map { "\(L10n.byteCount($0.bytes)) (\($0.itemCount) files)" } ?? L10n.text("Calculating…")
+            sizeText = cachedFolderSize.map { "\(L10n.byteCount($0.bytes)) (\($0.itemCount.formatted(.number.locale(L10n.locale))) files)" } ?? L10n.text("Calculating…")
         } else {
             sizeText = item.size.map { L10n.byteCount($0) } ?? "—"
         }
@@ -264,7 +265,7 @@ final class PreviewInspectorController: NSViewController {
                 if let cached = await FolderSizeCache.shared.cached(for: targetURL, modified: modDate) {
                     await MainActor.run { [weak self] in
                         guard let self, self.generation == generation else { return }
-                        self.sizeValueLabel?.stringValue = "\(L10n.byteCount(cached.bytes)) (\(cached.itemCount) files)"
+                        self.sizeValueLabel?.stringValue = "\(L10n.byteCount(cached.bytes)) (\(cached.itemCount.formatted(.number.locale(L10n.locale))) files)"
                     }
                     return
                 }
@@ -275,7 +276,7 @@ final class PreviewInspectorController: NSViewController {
                 await FolderSizeCache.shared.store(measured, for: targetURL, modified: modDate)
                 await MainActor.run { [weak self] in
                     guard let self, self.generation == generation else { return }
-                    self.sizeValueLabel?.stringValue = "\(L10n.byteCount(measured.bytes)) (\(measured.itemCount) files)"
+                    self.sizeValueLabel?.stringValue = "\(L10n.byteCount(measured.bytes)) (\(measured.itemCount.formatted(.number.locale(L10n.locale))) files)"
                 }
             }
         }

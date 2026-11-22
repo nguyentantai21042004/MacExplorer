@@ -191,11 +191,11 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     override func viewDidAppear() {
         super.viewDidAppear()
         // Keep metadata columns readable; let only the name column absorb resizing.
-        let metadataWidths = ["modified": CGFloat(185), "kind": CGFloat(100), "size": CGFloat(75)]
+        let metadataWidths = ["modified": CGFloat(175), "kind": CGFloat(140), "size": CGFloat(98)]
         for column in table.tableColumns {
             if let width = metadataWidths[column.identifier.rawValue] { column.width = width }
         }
-        table.tableColumns.first?.width = max(180, tableScroll.contentSize.width - 360)
+        table.tableColumns.first?.width = max(180, tableScroll.contentSize.width - 413)
         table.setFrameSize(NSSize(width: max(tableScroll.contentSize.width, 540), height: table.frame.height))
         updateChrome(); fitContentTable()
         if workspace?.activeBrowser === self { view.window?.makeFirstResponder(activeFileView) }
@@ -342,9 +342,9 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         table.registerForDraggedTypes([.fileURL])
         table.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
-        for (key, title, width) in [("name", L10n.text("Name"), 385.0), ("modified", L10n.text("Date modified"), 185.0), ("kind", L10n.text("Type"), 140.0), ("size", L10n.text("Size"), 85.0), ("location", L10n.text("Folder"), 180.0), ("created", L10n.text("Date created"), 185.0)] {
+        for (key, title, width) in [("name", L10n.text("Name"), 360.0), ("modified", L10n.text("Date modified"), 175.0), ("kind", L10n.text("Type"), 140.0), ("size", L10n.text("Size"), 98.0), ("location", L10n.text("Folder"), 180.0), ("created", L10n.text("Date created"), 185.0)] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(key))
-            column.title = title; column.width = width; column.minWidth = key == "name" ? 160 : 60
+            column.title = title; column.width = width; column.minWidth = key == "name" ? 160 : (key == "size" ? 86 : 60)
             column.headerCell.font = .systemFont(ofSize: 11)
             if key != "location" { column.sortDescriptorPrototype = NSSortDescriptor(key: key, ascending: true) }
             column.isHidden = key == "location" || key == "created"

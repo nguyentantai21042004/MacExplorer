@@ -4,29 +4,29 @@ import ExplorerCore
 @MainActor
 final class BatchRenameSheetController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     private let urls: [URL]
-    private var entries: [BatchRenameEntry] = []
+    var entries: [BatchRenameEntry] = []
     private let onApply: ([(URL, String)]) -> Void
 
-    private let modeSegment = NSSegmentedControl(labels: [
+    let modeSegment = NSSegmentedControl(labels: [
         L10n.text("Find & Replace"),
         L10n.text("Prefix / Suffix"),
         L10n.text("Sequence")
     ], trackingMode: .selectOne, target: nil, action: nil)
 
-    private let primaryField = NSTextField()
-    private let secondaryField = NSTextField()
+    let primaryField = NSTextField()
+    let secondaryField = NSTextField()
     private let primaryLabel = NSTextField(labelWithString: "")
     private let secondaryLabel = NSTextField(labelWithString: "")
-    private let startNumberField = NSTextField(string: "1")
-    private let padWidthField = NSTextField(string: "3")
+    let startNumberField = NSTextField(string: "1")
+    let padWidthField = NSTextField(string: "3")
     private let sequenceOptionsRow = NSStackView()
 
-    private let regexCheck = NSButton(checkboxWithTitle: L10n.text("Use regex"), target: nil, action: nil)
-    private let caseCheck = NSButton(checkboxWithTitle: L10n.text("Case sensitive"), target: nil, action: nil)
-    private let includeExtCheck = NSButton(checkboxWithTitle: L10n.text("Include extension"), target: nil, action: nil)
-    private let summaryLabel = NSTextField(labelWithString: "")
-    private let previewTable = NSTableView()
-    private let applyButton = NSButton(title: L10n.text("Rename"), target: nil, action: nil)
+    let regexCheck = NSButton(checkboxWithTitle: L10n.text("Use regex"), target: nil, action: nil)
+    let caseCheck = NSButton(checkboxWithTitle: L10n.text("Case sensitive"), target: nil, action: nil)
+    let includeExtCheck = NSButton(checkboxWithTitle: L10n.text("Include extension"), target: nil, action: nil)
+    let summaryLabel = NSTextField(labelWithString: "")
+    let previewTable = NSTableView()
+    let applyButton = NSButton(title: L10n.text("Rename"), target: nil, action: nil)
 
     init(urls: [URL], onApply: @escaping ([(URL, String)]) -> Void) {
         self.urls = urls
@@ -38,6 +38,7 @@ final class BatchRenameSheetController: NSWindowController, NSTableViewDataSourc
             defer: false
         )
         window.title = L10n.text("Batch Rename")
+        window.isReleasedWhenClosed = false
         super.init(window: window)
         buildUI()
         updateModeUI()
@@ -130,12 +131,12 @@ final class BatchRenameSheetController: NSWindowController, NSTableViewDataSourc
         }
     }
 
-    @objc private func modeChanged() {
+    @objc func modeChanged() {
         updateModeUI()
         recomputePlan()
     }
 
-    @objc private func inputsChanged() { recomputePlan() }
+    @objc func inputsChanged() { recomputePlan() }
 
     private func updateModeUI() {
         switch modeSegment.selectedSegment {
@@ -202,7 +203,7 @@ final class BatchRenameSheetController: NSWindowController, NSTableViewDataSourc
         parent.endSheet(window, returnCode: .cancel)
     }
 
-    @objc private func apply() {
+    @objc func apply() {
         let pairs = entries.filter(\.changed).map { ($0.source, $0.newName) }
         guard !pairs.isEmpty, entries.allSatisfy(\.isValid) else { return }
         if let window, let parent = window.sheetParent {
