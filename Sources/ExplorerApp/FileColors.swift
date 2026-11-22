@@ -20,7 +20,24 @@ enum FileColors {
     }
     static func icon(_ item: FileItem) -> NSImage {
         if item.isNavigable && !item.isSymbolicLink {
-            let base = item.finderColors.colors.first.map { Palette.makeFolderIcon(tint: color($0)) } ?? Palette.folderIcon
+            let rule = FolderRulesStore.shared.style(for: item.url)
+            let base: NSImage
+            if let finderColor = item.finderColors.colors.first {
+                base = FolderRulesStore.shared.folderIcon(
+                    tint: color(finderColor),
+                    tintKey: "finder:\(finderColor.rawValue)",
+                    symbol: rule?.symbol
+                )
+            } else if let rule {
+                let tint = FolderRulesStore.shared.color(forHex: rule.colorHex)
+                base = FolderRulesStore.shared.folderIcon(
+                    tint: tint,
+                    tintKey: rule.colorHex ?? "default",
+                    symbol: rule.symbol
+                )
+            } else {
+                base = Palette.folderIcon
+            }
             return badged(base, colors: Array(item.finderColors.colors.dropFirst()))
         }
         return badged(NSWorkspace.shared.icon(forFile: item.url.path), colors: item.finderColors.colors)

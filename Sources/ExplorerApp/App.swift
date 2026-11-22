@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if let icon = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") { NSApp.applicationIconImage = NSImage(contentsOf: icon) }
         buildMenu()
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesChanged), name: AppPreferences.changed, object: AppPreferences.shared)
+        NotificationCenter.default.addObserver(self, selector: #selector(folderRulesChanged), name: FolderRulesStore.changed, object: FolderRulesStore.shared)
         hotKeyRegistrar.onPress = { [weak self] id in
             guard let self, self.globalShortcut.activeID == id else { return }
             self.showExplorer()
@@ -169,6 +170,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             controller.workspace.right?.applyFolderSizePreference()
             controller.workspace.syncPreviewPanePreference()
             controller.workspace.refreshTheme()
+        }
+    }
+    @objc private func folderRulesChanged() {
+        for controller in windows {
+            controller.workspace.left.iconCache.removeAllObjects()
+            controller.workspace.right?.iconCache.removeAllObjects()
+            controller.workspace.refreshTheme()
+            controller.workspace.updateInspector(from: controller.workspace.activeBrowser)
         }
     }
 

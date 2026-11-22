@@ -173,4 +173,35 @@ struct EnhancedFeaturesTests {
         #expect(first == second)
         #expect(first?.itemCount == 1)
     }
+
+    @Test func folderAppearanceMatcherSupportsDepthPathAndNameRegexFast() {
+        let home = "/Users/demo"
+        let matcher = FolderAppearanceMatcher(rules: [
+            FolderAppearanceRule(root: "~/Workspaces", depth: 0, color: "#0EA5E9", symbol: "square.grid.2x2.fill"),
+            FolderAppearanceRule(root: "~/Workspaces", depth: 1, nameRegex: "^personal$", color: "purple", symbol: "person.fill"),
+            FolderAppearanceRule(root: "~/Workspaces", depth: 1, color: "#38BDF8", symbol: "folder.fill"),
+            FolderAppearanceRule(root: "~/Workspaces", depth: 2, nameRegex: "(?i)(api|backend|service)", color: "#10B981", symbol: "server.rack"),
+            FolderAppearanceRule(root: "~/Workspaces", depth: 2, nameRegex: "(?i)(web|portal|ui)", color: "#EC4899", symbol: "globe"),
+            FolderAppearanceRule(root: "~/Workspaces", depth: 2, color: "#6366F1", symbol: "chevron.left.forwardslash.chevron.right"),
+            FolderAppearanceRule(pathRegex: "^~/Archive/.*$", color: "#64748B", symbol: "archivebox.fill")
+        ], homeDirectory: home)
+
+        #expect(matcher.ruleCount == 7)
+        #expect(matcher.match(path: "/Users/demo/Workspaces") == FolderAppearanceStyle(colorHex: "#0EA5E9", symbol: "square.grid.2x2.fill"))
+        #expect(matcher.match(path: "/Users/demo/Workspaces/personal") == FolderAppearanceStyle(colorHex: "#A855F7", symbol: "person.fill"))
+        #expect(matcher.match(path: "/Users/demo/Workspaces/client") == FolderAppearanceStyle(colorHex: "#38BDF8", symbol: "folder.fill"))
+        #expect(matcher.match(path: "/Users/demo/Workspaces/client/order-api") == FolderAppearanceStyle(colorHex: "#10B981", symbol: "server.rack"))
+        #expect(matcher.match(path: "/Users/demo/Workspaces/client/admin-portal") == FolderAppearanceStyle(colorHex: "#EC4899", symbol: "globe"))
+        #expect(matcher.match(path: "/Users/demo/Workspaces/client/misc-repo") == FolderAppearanceStyle(colorHex: "#6366F1", symbol: "chevron.left.forwardslash.chevron.right"))
+        #expect(matcher.match(path: "/Users/demo/Workspaces/client/order-api/src") == nil)
+        #expect(matcher.match(path: "/Users/demo/Archive/2025") == FolderAppearanceStyle(colorHex: "#64748B", symbol: "archivebox.fill"))
+        #expect(matcher.match(path: "/Users/demo/Downloads") == nil)
+
+        // Verify 10,000 path checks stay well under 250ms even in debug builds.
+        let start = ContinuousClock.now
+        for i in 0..<10_000 {
+            _ = matcher.match(path: i.isMultiple(of: 2) ? "/Users/demo/Workspaces/client/order-api" : "/Users/demo/Downloads/file\(i)")
+        }
+        #expect(start.duration(to: .now) < .milliseconds(250))
+    }
 }

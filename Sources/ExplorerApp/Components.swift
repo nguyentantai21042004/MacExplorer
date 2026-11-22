@@ -117,7 +117,7 @@ enum Palette {
         }
     }
     static let folderIcon = makeFolderIcon()
-    static func makeFolderIcon(tint: NSColor? = nil) -> NSImage {
+    static func makeFolderIcon(tint: NSColor? = nil, symbol: String? = nil) -> NSImage {
       NSImage(size: NSSize(width: 64, height: 52), flipped: false) { _ in
         let back = NSBezierPath(roundedRect: NSRect(x: 3, y: 6, width: 58, height: 35), xRadius: 4, yRadius: 4)
         (tint?.blended(withFraction: 0.22, of: .black) ?? NSColor(calibratedRed: 0.90, green: 0.56, blue: 0.08, alpha: 1)).setFill(); back.fill()
@@ -125,6 +125,22 @@ enum Palette {
         NSColor(calibratedWhite: 1, alpha: 0.92).setFill(); NSRect(x: 7, y: 29, width: 50, height: 7).fill()
         let front = NSBezierPath(roundedRect: NSRect(x: 3, y: 5, width: 58, height: 31), xRadius: 4, yRadius: 4)
         NSGradient(starting: tint?.blended(withFraction: 0.25, of: .white) ?? NSColor(calibratedRed: 1, green: 0.83, blue: 0.25, alpha: 1), ending: tint ?? NSColor(calibratedRed: 0.98, green: 0.68, blue: 0.08, alpha: 1))?.draw(in: front, angle: -90)
+        if let symbol, !symbol.isEmpty,
+           let baseGlyph = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 15, weight: .semibold)) {
+            let glyphSize = baseGlyph.size
+            let scale = min(1, min(22 / max(1, glyphSize.width), 17 / max(1, glyphSize.height)))
+            let w = glyphSize.width * scale
+            let h = glyphSize.height * scale
+            let target = NSRect(x: 32 - w / 2, y: 20 - h / 2, width: w, height: h)
+            let tintedGlyph = NSImage(size: NSSize(width: w, height: h), flipped: false) { r in
+                baseGlyph.draw(in: r)
+                NSColor.black.withAlphaComponent(0.32).setFill()
+                r.fill(using: .sourceAtop)
+                return true
+            }
+            tintedGlyph.draw(in: target)
+        }
         return true
       }
     }

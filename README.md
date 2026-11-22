@@ -28,6 +28,7 @@
   - **Quick Jump (`⌘K`):** Fuzzy palette for favorites, open tabs, themes, and workspace commands.
   - **Batch Rename (`F2` / `Return` on multi-selection):** Live side-by-side preview for Find & Replace (regex supported), Prefix / Suffix, and Sequence numbering with duplicate validation and single-shot `⌘Z` Undo.
   - **Drag-and-drop Favorites & Dual Panes (`⇧⌘D`):** Reorder pinned Favorites directly in the sidebar, drag folders to pin them, and transfer files across split panes.
+  - **Custom folder icon rules (`~/.config/explorer/folder-rules.json`):** Assign custom colors and SF Symbol badges to folders by `root` + `depth`, `pathRegex`, or `nameRegex` without writing `Icon\r` or extended attributes to disk. Compiled once at load time with bounded vector icon caching and automatic hot-reload.
   - **Full file operations with Undo:** Copy, Cut, Paste, Move, Rename, New Folder/File, Trash, ZIP Compress/Extract, conflict resolution, and Finder color labels.
 
 ![Git repository view in Tokyo Night theme with live Git status badge and Inspector](docs/images/git-repo-tokyo-night.png)

@@ -240,4 +240,33 @@ struct EnhancedAppTests {
         #expect(pbItem.types.contains(NSPasteboard.PasteboardType("io.bquick.explorer.favorite-id")))
         #expect(!pbItem.types.contains(.fileURL))
     }
+
+    @Test func folderRulesStoreLoadsJsonAndCachesRenderedVectorIcons() throws {
+        _ = NSApplication.shared
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Explorer-Rules-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let config = dir.appendingPathComponent("folder-rules.json")
+        let json = """
+        {
+          "rules": [
+            { "root": "\(dir.path)", "depth": 1, "nameRegex": "^api-", "color": "#10B981", "symbol": "server.rack" },
+            { "root": "\(dir.path)", "depth": 1, "color": "#38BDF8", "symbol": "folder.fill" }
+          ]
+        }
+        """
+        try json.write(to: config, atomically: true, encoding: .utf8)
+
+        let store = FolderRulesStore(configURL: config, watch: false)
+        #expect(store.ruleCount == 2)
+        let apiStyle = try #require(store.style(for: dir.appendingPathComponent("api-gateway")))
+        #expect(apiStyle == FolderAppearanceStyle(colorHex: "#10B981", symbol: "server.rack"))
+
+        let tint = try #require(store.color(forHex: apiStyle.colorHex))
+        let img1 = store.folderIcon(tint: tint, tintKey: "#10B981", symbol: "server.rack")
+        let img2 = store.folderIcon(tint: tint, tintKey: "#10B981", symbol: "server.rack")
+        // Verify icon instances are shared by reference from the bounded NSCache.
+        #expect(img1 === img2)
+    }
 }

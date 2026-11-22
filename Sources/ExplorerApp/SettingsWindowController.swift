@@ -77,6 +77,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let startup = NSPopUpButton(), appearance = NSPopUpButton(), theme = NSPopUpButton(), viewMode = NSPopUpButton(), scope = NSPopUpButton(), shortcutAction = NSPopUpButton()
     private let previewPane = NSButton(checkboxWithTitle: L10n.text("Show preview & inspector panel"), target: nil, action: nil)
     private let calculateFolderSizes = NSButton(checkboxWithTitle: L10n.text("Calculate folder sizes in background"), target: nil, action: nil)
+    private let editFolderRulesButton = NSButton(title: L10n.text("Edit Folder Rules…"), target: nil, action: nil)
+    private let reloadFolderRulesButton = NSButton(title: L10n.text("Reload"), target: nil, action: nil)
+    private let folderRulesStatus = NSTextField(labelWithString: "")
     private let terminalApplication = NSPopUpButton(), editorApplication = NSPopUpButton()
     private let folderDefaultButton = NSButton(title: L10n.text("Set as Default…"), target: nil, action: nil)
     private let folderDefaultStatus = NSTextField(wrappingLabelWithString: "")
@@ -102,6 +105,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         tabs.preferredContentSize = NSSize(width: 590, height: 540)
         window.contentViewController = tabs; window.center()
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: AppPreferences.changed, object: preferences)
+        NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: FolderRulesStore.changed, object: FolderRulesStore.shared)
         NotificationCenter.default.addObserver(self, selector: #selector(refresh), name: NSApplication.didBecomeActiveNotification, object: nil)
         refresh()
     }
@@ -156,6 +160,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         hidden.target = self; hidden.action = #selector(hiddenChanged)
         previewPane.target = self; previewPane.action = #selector(previewPaneChanged)
         calculateFolderSizes.target = self; calculateFolderSizes.action = #selector(calculateFolderSizesChanged)
+        editFolderRulesButton.bezelStyle = .rounded; editFolderRulesButton.target = self; editFolderRulesButton.action = #selector(editFolderRules)
+        reloadFolderRulesButton.bezelStyle = .rounded; reloadFolderRulesButton.target = self; reloadFolderRulesButton.action = #selector(reloadFolderRules)
+        folderRulesStatus.font = .systemFont(ofSize: 11); folderRulesStatus.textColor = .secondaryLabelColor
+        let folderRulesRow = NSStackView(views: [editFolderRulesButton, reloadFolderRulesButton, folderRulesStatus])
+        folderRulesRow.orientation = .horizontal; folderRulesRow.spacing = 8; folderRulesRow.alignment = .centerY
         launchAtLogin.target = self; launchAtLogin.action = #selector(loginChanged)
         launchAtLogin.isEnabled = !DemoData.active
         loginStatus.font = .systemFont(ofSize: 12); loginStatus.textColor = .secondaryLabelColor
@@ -164,6 +173,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             row(L10n.text("Open new windows to"), control: startup), row(L10n.text("Color theme"), control: theme), row(L10n.text("Appearance"), control: appearance),
             row(L10n.text("Default folder view"), control: viewMode), row(L10n.text("Default search scope"), control: scope),
             row(L10n.text("Interface language"), control: language), languageRestartControls, languageRestartNote,
+            row(L10n.text("Folder icon rules"), control: folderRulesRow),
             hidden, previewPane, calculateFolderSizes, note(L10n.text("View and search defaults apply to new tabs. Existing tabs keep their layout; the View menu also updates the folder-view default.")),
             launchAtLogin, loginStatus, loginSettings
         ])
@@ -320,8 +330,35 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         shortcutAction.selectItem(at: preferences.shortcutOpensNewWindow ? 1 : 0)
         if !recorder.isRecording { recorder.title = preferences.shortcut.title; updateShortcutStatus() }
         refreshLoginStatus()
+        refreshFolderRulesStatus()
         refreshApplications()
         refreshFolderDefault()
+    }
+    private func refreshFolderRulesStatus() {
+        let store = FolderRulesStore.shared
+        if let err = store.lastError {
+            folderRulesStatus.stringValue = L10n.text("Invalid JSON: %1$@", err)
+            folderRulesStatus.textColor = .systemRed
+        } else if store.ruleCount == 0 {
+            folderRulesStatus.stringValue = "~/.config/explorer/folder-rules.json"
+            folderRulesStatus.textColor = .secondaryLabelColor
+        } else {
+            folderRulesStatus.stringValue = "\(store.ruleCount) rules active"
+            folderRulesStatus.textColor = .secondaryLabelColor
+        }
+    }
+    @objc private func editFolderRules() {
+        do {
+            try FolderRulesStore.shared.ensureConfigFileExists()
+            FolderRulesStore.shared.reload()
+            ExternalApplications.openEditor(files: [FolderRulesStore.shared.configURL], window: window)
+        } catch {
+            ExternalApplications.showError(error.localizedDescription, window: window)
+        }
+    }
+    @objc private func reloadFolderRules() {
+        FolderRulesStore.shared.reload()
+        refreshFolderRulesStatus()
     }
     private func refreshLoginStatus() {
         let state = SMAppService.mainApp.status

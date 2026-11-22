@@ -233,9 +233,19 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
         label.translatesAutoresizingMaskIntoConstraints = false; cell.textField = label; cell.addSubview(label)
         let leading: NSLayoutXAxisAnchor
         if !node.section {
-            let image = NSImageView(image: Palette.symbol(node.symbol) ?? NSImage()); image.translatesAutoresizingMaskIntoConstraints = false
-            image.contentTintColor = node.symbol.hasPrefix("folder") ? .systemYellow : node.favoriteID != nil ? (node.symbol == "house.fill" ? .systemOrange : .systemBlue) : .secondaryLabelColor
-            if let color = node.finderColors.colors.first { image.contentTintColor = FileColors.color(color) }
+            let rule = node.url.flatMap { FolderRulesStore.shared.style(for: $0) }
+            let isFolderNode = node.symbol.hasPrefix("folder")
+            let resolvedSymbol = (isFolderNode ? rule?.symbol : nil) ?? node.symbol
+            let image = NSImageView(image: Palette.symbol(resolvedSymbol) ?? Palette.symbol(node.symbol) ?? NSImage())
+            image.translatesAutoresizingMaskIntoConstraints = false
+            let defaultTint: NSColor = isFolderNode ? .systemYellow : node.favoriteID != nil ? (node.symbol == "house.fill" ? .systemOrange : .systemBlue) : .secondaryLabelColor
+            if let color = node.finderColors.colors.first {
+                image.contentTintColor = FileColors.color(color)
+            } else if isFolderNode, let ruleColor = FolderRulesStore.shared.color(forHex: rule?.colorHex) {
+                image.contentTintColor = ruleColor
+            } else {
+                image.contentTintColor = defaultTint
+            }
             cell.imageView = image; cell.addSubview(image)
             NSLayoutConstraint.activate([image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2), image.centerYAnchor.constraint(equalTo: cell.centerYAnchor), image.widthAnchor.constraint(equalToConstant: 17), image.heightAnchor.constraint(equalToConstant: 17)])
             leading = image.trailingAnchor
