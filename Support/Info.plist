@@ -3,7 +3,8 @@
 <plist version="1.0"><dict>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleName</key><string>Explorer</string>
-  <key>CFBundleDisplayName</key><string>Explorer</string>
+  <key>CFBundleDisplayName</key><string>File Explorer</string>
+  <key>MDItemKeywords</key><string>File Explorer, Files, File Manager, Folder, Finder</string>
   <key>CFBundleExecutable</key><string>Explorer</string>
   <key>CFBundleIdentifier</key><string>io.bquick.explorer</string>
   <key>CFBundlePackageType</key><string>APPL</string>
