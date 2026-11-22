@@ -1,137 +1,89 @@
 <p align="center">
-  <img src="docs/images/app-icon.png" width="96" height="96" alt="MacExplorer folder icon">
+  <img src="docs/images/app-icon.png" width="96" height="96" alt="MacExplorer icon">
 </p>
 
-# MacExplorer
+<h1 align="center">MacExplorer</h1>
 
-MacExplorer was developed by [Sazzad Hossain](https://github.com/djad442) at Binary Quest. [andyzoer](https://github.com/andyzoer) contributed the multilingual interface and support for external language packs.
+<p align="center">
+  A fast, native Swift + AppKit file manager for macOS 14+ with zero external dependencies.<br>
+  Dual panes, multi-theme dark palettes, real POSIX folder sizes, inline preview &amp; inspector, Git status badges, advanced search, batch rename, and Quick Jump.
+</p>
 
-A native macOS file manager for people who like Windows Explorer.
+<p align="center">
+  <strong>macOS 14+ · Swift 6 · Universal (Apple Silicon + Intel) · MIT License</strong>
+</p>
 
-MacExplorer brings familiar tabs, a folder tree, drive overviews, and keyboard shortcuts to the Mac, with native Quick Look, thumbnails, and Finder color tags. Built with Swift and AppKit, with Sparkle for signed software updates.
+---
 
-**Early development · macOS 14+ · MIT licensed**
+![Workspace overview in Slate Cyan theme with real folder sizes, Git branch badges, and right-side Inspector](docs/images/workspace-overview.png)
 
-## Download
+## Highlights
 
-[Download Explorer for Mac](https://explorer.bquick.io/#download) · [Release notes and checksums](https://github.com/binaryquest/MacExplorer/releases/latest)
+- **Native speed & low resource footprint:** Built directly on Swift 6 and AppKit with zero third-party dependencies. Background folder sizing uses Darwin POSIX `fts_open` with in-flight coalescing and background QoS so idle CPU drops to `0%`.
+- **5 curated color themes:** `Slate Cyan` (default), `Tokyo Night`, `Nord`, `Catppuccin Mocha`, and `System Default`, switchable live from Settings, the View menu, or Quick Jump (`⌘K`).
+- **Right-side Preview & Inspector (`⌥⌘P`):** Instant syntax-readable code/text preview (up to 32 KB), Quick Look thumbnails, real aggregated folder size & item count, Finder color tag dots, and one-click `Terminal`, `Copy Path`, and `Info` actions.
+- **Git-aware browsing:** Detects Git branches on folders (`Folder · master`, `Folder · feat/theme`) and shows live working-tree status (`git: master · 1M 3?`) in the footer bar.
+- **Fast structured search (`⌘F` / `⇧⌘F`):** Supports tokens `ext:swift,go`, `size:>1mb`, `mod:<7d`, `type:folder`, `type:file`, `regex:...`, and `content:...`. Automatically skips noisy build/dependency directories (`node_modules`, `.git`, `.build`, `DerivedData`, `Pods`, `__pycache__`, `.venv`) and binary files during content scans.
+- **Developer workflow tools:**
+  - **Quick Jump (`⌘K`):** Fuzzy palette for favorites, open tabs, themes, and workspace commands.
+  - **Batch Rename (`F2` / `Return` on multi-selection):** Live side-by-side preview for Find & Replace (regex supported), Prefix / Suffix, and Sequence numbering with duplicate validation and single-shot `⌘Z` Undo.
+  - **Drag-and-drop Favorites & Dual Panes (`⇧⌘D`):** Reorder pinned Favorites directly in the sidebar, drag folders to pin them, and transfer files across split panes.
+  - **Full file operations with Undo:** Copy, Cut, Paste, Move, Rename, New Folder/File, Trash, ZIP Compress/Extract, conflict resolution, and Finder color labels.
 
-Open the DMG and drag **Explorer** into **Applications**. The app is Developer ID signed and notarized by Apple, with one universal download for Apple Silicon and Intel. Future updates are available through **Explorer → Check for Updates…**. Automatic update preferences are in **Settings → Updates**.
+![Git repository view in Tokyo Night theme with live Git status badge and Inspector](docs/images/git-repo-tokyo-night.png)
 
-## Languages
+## Build and install
 
-English is built in. Install additional packs or create your own using the [translation guide](docs/LOCALIZATION.md) and the [translator notes](Localizations/TRANSLATING.txt). You can add or edit a pack without rebuilding Explorer. Missing entries appear in English.
-
-### Supported languages
-
-- **Built in:** English.
-- **External packs:** Albanian, Arabic, Armenian, Azerbaijani, Bengali, Bulgarian, Chinese (Simplified), Chinese (Traditional), Croatian, Czech, Danish, Dutch, Estonian, Finnish, French, Georgian, German, Greek, Hebrew, Hindi, Hungarian, Indonesian, Irish, Italian, Japanese, Korean, Latvian, Lithuanian, Norwegian (Bokmål), Polish, Portuguese, Romanian, Serbian (Cyrillic), Slovak, Slovenian, Spanish, Swedish, Thai, Turkish, Ukrainian, Urdu, and Vietnamese.
-
-The language packs use machine translation with some manual edits. Translations may be inaccurate or inconsistent. Contributions from fluent speakers are welcome.
-
-### Installing and choosing a language
-
-If your DMG includes language packs, run **Install Explorer.command** to install the app and add the packs. You can also use **Settings → General → Install Language Packs…** to import a `.lproj` folder or a folder containing packs. Explorer asks for confirmation before replacing installed packs.
-
-Under **Settings → General → Interface language**, leave **Automatic (macOS)** selected to follow your primary system language, or choose a language and click **Apply and Restart**.
-
-![This Mac with drives, storage usage bars, and cloud locations](docs/images/this-mac.png)
-
-*All screenshots use fictional sample files, accounts, and storage figures.*
-
-## What it can do
-
-- **Browse your way:** tabs, tab reordering and detaching into windows, breadcrumbs, a folder tree, pinned favorites, and dual panes.
-- **Manage files:** copy, cut, paste, move, rename, new folders, Trash, ZIP compression and extraction, conflict handling, and undo. Drag files between folders, tabs, and panes. Open native Get Info with **Properties**.
-- **Find things:** search filenames in a folder or its subfolders, highlight matches, and click a result's folder path to open it with the file selected.
-- **Choose a view:** details, content, and multiple icon sizes; sort and group independently; preview files with Quick Look.
-- **See your storage:** local and external drives, mounted network shares, and locally available cloud folders, including Google Drive.
-- **Make it yours:** Finder color tags, light/dark appearance, startup and browsing preferences, optional launch at login, and a configurable global shortcut (⌘E by default).
-- **Use your favorite apps:** choose a registered application from **Open With**, open folders in your preferred terminal, and text/code/configuration files in your chosen editor. The context menu groups common file actions into a compact icon row.
-
-## A closer look
-
-Search results show the containing folder, modification date, size, and matching text.
-
-![Search results with highlighted matches and clickable folder paths](docs/images/search.png)
-
-Two panes make it easy to work across folders, with independent tabs and views.
-
-![Dual panes showing color-tagged folders and image thumbnails](docs/images/dual-pane.png)
-
-## Build and run
-
-You need **macOS 14 or later** and a **Swift 6 toolchain** from Xcode or Xcode Command Line Tools.
+Requires **macOS 14+** and a **Swift 6 toolchain** (Xcode or Xcode Command Line Tools).
 
 ```sh
-git clone https://github.com/binaryquest/MacExplorer.git
+git clone https://github.com/nguyentantai21042004/MacExplorer.git
 cd MacExplorer
-zsh scripts/build.sh
-open build/Explorer.app
+zsh scripts/build.sh --universal
+ditto build/Explorer.app /Applications/Explorer.app
+open /Applications/Explorer.app
 ```
 
-The build script creates `build/Explorer.app`, generates its icon, embeds Sparkle, and applies a local ad-hoc signature. Automatic updates are disabled in source builds.
-
-The app appears as **Explorer** in macOS. Open **Explorer → Settings…** to change the global shortcut, appearance, startup behavior, and browsing defaults. The global shortcut works while Explorer is running, including when its last window is closed; it can be changed or disabled if it conflicts with another app.
-
-The build keeps a **Localizations** folder beside `build/Explorer.app`, where Explorer can discover the packs. To keep using the packs after moving the app to **Applications**, install them from **Settings → General → Install Language Packs…**. See [Install or update a translation](docs/LOCALIZATION.md).
-
-In **Settings → Applications**, choose your terminal and text editor. The defaults are macOS Terminal and TextEdit; installed alternatives such as iTerm2, Warp, Visual Studio Code, Sublime Text, and Zed appear automatically. **Choose Application…** lets you select another app. A custom terminal must accept folder URLs through macOS’s standard Open mechanism.
-
-In the same pane, **Set as Default…** asks macOS to use Explorer for folder opens that use the system default. If macOS accepts the request, **Use Finder…** lets you switch back. The pane shows which app currently opens folders. **Reveal in Finder** still opens Finder.
-
-Right-click a folder, sidebar location, or drive to open a terminal there; right-click empty folder space to use the current folder. For a selected file, the terminal opens its containing folder. Text files—including JSON, YAML, scripts, and dotfiles—offer **Open with [editor]**; other regular files offer **Open as Text with [editor]**. These preferences do not change macOS file associations or normal double-click behavior.
-
-**Open With** lists applications macOS registers for the selected files, with the shared default first. For multiple files, it lists apps that handle every selected file; **Other…** lets you choose an application manually. This opens the files once without changing their default app.
-
-**Compress to ZIP** creates `name.zip` for one item or `Archive.zip` for multiple items in the current folder. In recursive search, it uses the first selected item's containing folder and preserves relative paths so identically named files from different folders remain distinct. **Extract All…** lets you choose a parent folder, then unpacks into a folder named after the ZIP. Existing destinations offer Keep Both, Replace, Skip, or Cancel; Replace sends the old destination to Trash. Both operations support cancellation and Undo, which refuses to remove output edited since the operation. ZIPs contain standard file contents, folders, and symlinks; Finder tags, extended attributes, resource forks, and password-protected archives are not supported. Download quarantine is preserved on extracted contents.
-
-**Properties** (⌘I) opens Finder's native Get Info window for selected items, drives, sidebar folders, or the current folder. macOS may ask you to allow Explorer to control Finder the first time. If denied, you can enable it later in **System Settings → Privacy & Security → Automation**.
-
-## Handy shortcuts
-
-| Action | Shortcut |
-| --- | --- |
-| Bring Explorer forward | ⌘E (configurable) |
-| Settings | ⌘, |
-| New / close tab | ⌘T / ⌘W |
-| Go to a path | ⌘L |
-| Search / search subfolders | ⌘F / ⇧⌘F |
-| Toggle dual panes / switch pane | ⇧⌘D / F6 |
-| Quick Look | Space |
-| Properties / native Get Info | ⌘I |
-| Rename | F2 |
-| Copy / cut / paste / undo | ⌘C / ⌘X / ⌘V / ⌘Z |
-| New folder | ⇧⌘N |
-
-Windows-style Ctrl+C/X/V/Z also work when the file list has focus.
-
-## Current scope
-
-MacExplorer is a standalone file manager. macOS still uses Finder for system integrations. Search currently matches filenames rather than file contents. Cloud folders come from providers already installed on your Mac; MacExplorer does not sign into cloud accounts or provide its own sync engine.
-
-This is an early project under active development. Bug reports and small, focused pull requests are welcome—please include your macOS version and steps to reproduce. Use sample data in screenshots and reports.
-
-## Development
+Run the full test suite:
 
 ```sh
 zsh scripts/test.sh
 ```
 
-`Sources/ExplorerCore` contains navigation, search, storage models, and file operations. `Sources/ExplorerApp` contains the native interface and macOS integrations. `Tests` covers the core behavior and AppKit interactions.
+## Optional: Use as default file viewer (`Reveal in Finder`)
 
-To create safe screenshots of your own, see [the demo guide](docs/SCREENSHOTS.md).
+Explorer coexists safely alongside macOS Finder. To route `Reveal in Finder` calls from apps such as VS Code, Cursor, Chrome, and Raycast to Explorer:
 
-## Releases and updates
+```sh
+defaults write -g NSFileViewer -string io.bquick.explorer
+```
 
-The release pipeline builds universal DMGs, signs them with Developer ID, submits them for Apple notarization, and publishes signed Sparkle updates through Cloudflare R2. Official builds include **Check for Updates…** and update preferences.
+To revert back to Finder at any time:
 
-Official releases are available from [GitHub Releases](https://github.com/binaryquest/MacExplorer/releases/latest) and the download link above. An end-to-end upgrade through Explorer passed before the first release. Maintainers can follow the [release setup guide](docs/RELEASING.md) and [first-release validation report](docs/RELEASE-VALIDATION-0.11.0.md).
+```sh
+defaults delete -g NSFileViewer
+```
 
-Sparkle and its bundled components retain their [third-party licenses](Support/Licenses/Sparkle.txt).
+You can also toggle the system default folder handler inside **Explorer → Settings… → Applications → Set as Default…**.
 
-## License
+## Keyboard shortcuts
 
-[MIT](LICENSE). Free to use, modify, and distribute, including commercially.
+| Action | Shortcut |
+| --- | --- |
+| Bring Explorer forward | `⌘E` (configurable) |
+| Quick Jump palette | `⌘K` |
+| Toggle Preview & Inspector panel | `⌥⌘P` |
+| Toggle Dual Panes / Switch pane | `⇧⌘D` / `F6` |
+| Search / Recursive search | `⌘F` / `⇧⌘F` |
+| Edit breadcrumb path | `⌘L` |
+| New tab / Close tab | `⌘T` / `⌘W` |
+| Rename / Batch Rename (multi-select) | `F2` or `Return` |
+| Quick Look preview | `Space` |
+| Native Get Info (Properties) | `⌘I` |
+| Pin / Unpin current folder | `⌘D` |
+| Toggle hidden files | `⇧⌘.` |
+| Undo last file operation | `⌘Z` |
 
-MacExplorer is an independent project, inspired by Windows Explorer and built for macOS. It is not affiliated with Microsoft or Apple.
+## Attribution & license
+
+Forked and customized from [binaryquest/MacExplorer](https://github.com/binaryquest/MacExplorer) by [Sazzad Hossain](https://github.com/djad442) at Binary Quest (with multilingual packs contributed by [andyzoer](https://github.com/andyzoer)). Released under the [MIT License](LICENSE).

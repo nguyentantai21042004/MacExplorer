@@ -33,4 +33,24 @@ public struct Favorites: Codable, Equatable, Sendable {
         guard target != index else { return }
         items.insert(items.remove(at: index), at: target)
     }
+    public mutating func move(_ id: UUID, to targetIndex: Int) {
+        guard let currentIndex = items.firstIndex(where: { $0.id == id }), !items.isEmpty else { return }
+        let clamped = min(max(0, targetIndex), items.count - 1)
+        guard clamped != currentIndex else { return }
+        let item = items.remove(at: currentIndex)
+        items.insert(item, at: clamped)
+    }
+    @discardableResult public mutating func insert(_ url: URL, at index: Int, name: String? = nil) -> Bool {
+        guard url.isFileURL else { return false }
+        let path = url.standardizedFileURL.path
+        if let existingIndex = items.firstIndex(where: { $0.url.standardizedFileURL.path == path }) {
+            let item = items.remove(at: existingIndex)
+            let clamped = min(max(0, index > existingIndex ? index - 1 : index), items.count)
+            items.insert(item, at: clamped)
+            return true
+        }
+        let clamped = min(max(0, index), items.count)
+        items.insert(Favorite(url: url, name: name), at: clamped)
+        return true
+    }
 }

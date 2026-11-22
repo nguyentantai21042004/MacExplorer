@@ -99,6 +99,7 @@ extension BrowserViewController {
     }
     func startSearch(debounce: Bool = false) {
         cancelSearchWork(); tab.loadTask?.cancel(); tab.sortTask?.cancel(); refreshTask?.cancel()
+        folderSizeTask?.cancel(); gitStatusTask?.cancel(); isMeasuringFolderSizes = false
         watcher = nil; watcherURL = nil; watcherTabID = nil
         let tab = self.tab, generation = tab.searchGeneration
         let root = tab.history.current, query = tab.query, hidden = showHidden
@@ -108,16 +109,26 @@ extension BrowserViewController {
         table.deselectAll(nil); collection.selectionIndexPaths = []; suppressSelection = false
         applyPresentationMode(); updateSearchControls(); updateQuickLookSelection(); updateEmptyState()
         tab.searchTask = Task { [weak self, weak tab] in
-            if debounce { try? await Task.sleep(for: .milliseconds(300)) }
+            if debounce { try? await Task.sleep(for: .milliseconds(220)) }
             guard !Task.isCancelled, let self, let tab, self.tab === tab, tab.searchGeneration == generation else { return }
+            self.searchLastApplied = .now
+            self.searchHasUnappliedMatches = false
             let worker = Task.detached(priority: .userInitiated) { [self, tab] in
                 try await DirectorySearch.run(root: root, query: query, showHidden: hidden) { update in
                     await MainActor.run { [self, tab] in
                         guard self.tab === tab, tab.searchGeneration == generation else { return }
                         tab.searchScanned = update.scanned; tab.searchSkipped = update.unreadableFolders; tab.searchLimited = update.reachedLimit
                         if !update.matches.isEmpty {
+                            let isFirstBatch = tab.items.isEmpty
                             tab.scrollPositions[self.scrollKey] = self.activeScroll.contentView.bounds.origin.y
-                            tab.items.append(contentsOf: update.matches); self.applyView()
+                            tab.items.append(contentsOf: update.matches)
+                            if isFirstBatch || self.searchLastApplied.duration(to: .now) >= .milliseconds(300) {
+                                self.applyView()
+                                self.searchLastApplied = .now
+                                self.searchHasUnappliedMatches = false
+                            } else {
+                                self.searchHasUnappliedMatches = true
+                            }
                         }
                         self.updateStatus()
                     }
@@ -126,7 +137,9 @@ extension BrowserViewController {
             do {
                 _ = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
                 guard !Task.isCancelled, self.tab === tab, tab.searchGeneration == generation else { return }
-                tab.loading = false; tab.searchTask = nil; self.updateStatus(); self.updateEmptyState()
+                tab.loading = false; tab.searchTask = nil
+                if self.searchHasUnappliedMatches { self.applyView(); self.searchHasUnappliedMatches = false }
+                self.updateStatus(); self.updateEmptyState()
             } catch {
                 guard !Task.isCancelled, self.tab === tab, tab.searchGeneration == generation else { return }
                 tab.loading = false; tab.searchTask = nil; tab.error = .other(error.localizedDescription)

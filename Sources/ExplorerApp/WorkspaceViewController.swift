@@ -253,7 +253,17 @@ final class WorkspaceViewController: NSViewController, NSSplitViewDelegate {
         guard ready, browser === activeBrowser, AppPreferences.shared.showPreviewPane else { return }
         let items = browser.tab.isThisMac ? [] : browser.selectedItems
         let folder: URL? = browser.tab.isThisMac ? BrowserLocation.thisMac : browser.tab.history.current
-        inspector.update(items: items, currentFolder: folder, cachedFolderSizes: browser.folderSizes)
+        inspector.update(
+            items: items,
+            currentFolder: folder,
+            cachedFolderSizes: browser.folderSizes,
+            currentFolderSummary: browser.currentFolderSizeSummary,
+            deferCurrentFolderSize: browser.isMeasuringFolderSizes
+        )
+    }
+    func updateInspectorFolderSizes(from browser: BrowserViewController) {
+        guard ready, browser === activeBrowser, AppPreferences.shared.showPreviewPane else { return }
+        inspector.updateCachedFolderSizes(browser.folderSizes, currentFolderSummary: browser.currentFolderSizeSummary)
     }
     func refreshTheme() {
         guard ready else { return }

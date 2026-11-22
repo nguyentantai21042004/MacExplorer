@@ -22,6 +22,12 @@ final class FavoriteStore {
         save()
     }
     func move(_ id: UUID, by offset: Int) { favorites.move(id, by: offset); save() }
+    func move(_ id: UUID, to index: Int) { favorites.move(id, to: index); save() }
+    func insert(_ url: URL, at index: Int) {
+        guard url.isFileURL else { return }
+        favorites.insert(url, at: index)
+        save()
+    }
     private func save() {
         if let data = try? JSONEncoder().encode(favorites) { UserDefaults.standard.set(data, forKey: "explorer.favorites.v1") }
         NotificationCenter.default.post(name: Self.changed, object: nil)

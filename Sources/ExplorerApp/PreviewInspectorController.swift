@@ -27,6 +27,8 @@ final class PreviewInspectorController: NSViewController {
 
     private var currentItems: [FileItem] = []
     private var currentFolder: URL?
+    private var inspectedFolderID: String?
+    private var inspectedIsCurrentFolder = false
     private var previewTask: Task<Void, Never>?
     private var sizeTask: Task<Void, Never>?
     private var thumbnailRequest: QLThumbnailGenerator.Request?
@@ -163,7 +165,13 @@ final class PreviewInspectorController: NSViewController {
         surface.needsDisplay = true
     }
 
-    func update(items: [FileItem], currentFolder: URL?, cachedFolderSizes: [String: FolderSizeResult]) {
+    func update(
+        items: [FileItem],
+        currentFolder: URL?,
+        cachedFolderSizes: [String: FolderSizeResult],
+        currentFolderSummary: FolderSizeResult? = nil,
+        deferCurrentFolderSize: Bool = false
+    ) {
         generation = UUID()
         let activeGeneration = generation
         previewTask?.cancel()
@@ -172,6 +180,8 @@ final class PreviewInspectorController: NSViewController {
 
         self.currentItems = items
         self.currentFolder = currentFolder
+        self.inspectedFolderID = nil
+        self.inspectedIsCurrentFolder = false
         guard isViewLoaded else { return }
 
         if items.count > 1 {
@@ -179,6 +189,7 @@ final class PreviewInspectorController: NSViewController {
             return
         }
         if let item = items.first {
+            inspectedFolderID = item.isNavigable ? item.id : nil
             renderSingle(item, cachedFolderSize: cachedFolderSizes[item.id], generation: activeGeneration)
             return
         }
@@ -188,10 +199,35 @@ final class PreviewInspectorController: NSViewController {
                 name: currentFolder.lastPathComponent.isEmpty ? currentFolder.path : currentFolder.lastPathComponent,
                 isDirectory: true
             )
-            renderSingle(folderItem, cachedFolderSize: cachedFolderSizes[folderItem.id], generation: activeGeneration, isCurrentFolder: true)
+            inspectedFolderID = folderItem.id
+            inspectedIsCurrentFolder = true
+            let cached = currentFolderSummary ?? cachedFolderSizes[folderItem.id]
+            renderSingle(
+                folderItem,
+                cachedFolderSize: cached,
+                generation: activeGeneration,
+                isCurrentFolder: true,
+                deferSizeCalculation: deferCurrentFolderSize
+            )
             return
         }
         renderThisMac()
+    }
+
+    /// Lightweight in-place size refresh that avoids restarting preview/thumbnail/size tasks.
+    func updateCachedFolderSizes(_ cachedFolderSizes: [String: FolderSizeResult], currentFolderSummary: FolderSizeResult?) {
+        guard isViewLoaded, let sizeValueLabel else { return }
+        if inspectedIsCurrentFolder, let summary = currentFolderSummary {
+            sizeValueLabel.stringValue = formatFolderSize(summary)
+            return
+        }
+        if let id = inspectedFolderID, let result = cachedFolderSizes[id] {
+            sizeValueLabel.stringValue = formatFolderSize(result)
+        }
+    }
+
+    private func formatFolderSize(_ result: FolderSizeResult) -> String {
+        "\(L10n.byteCount(result.bytes)) (\(result.itemCount.formatted(.number.locale(L10n.locale))) files)"
     }
 
     private func renderThisMac() {
@@ -225,7 +261,13 @@ final class PreviewInspectorController: NSViewController {
         openExternalButton.isHidden = true
     }
 
-    private func renderSingle(_ item: FileItem, cachedFolderSize: FolderSizeResult?, generation: UUID, isCurrentFolder: Bool = false) {
+    private func renderSingle(
+        _ item: FileItem,
+        cachedFolderSize: FolderSizeResult?,
+        generation: UUID,
+        isCurrentFolder: Bool = false,
+        deferSizeCalculation: Bool = false
+    ) {
         titleLabel.stringValue = item.name
         subtitleLabel.stringValue = isCurrentFolder ? L10n.text("Current folder") : item.kind
         actionsStack.isHidden = false
@@ -243,10 +285,21 @@ final class PreviewInspectorController: NSViewController {
 
         rebuildTags(for: isCurrentFolder ? [] : [item])
 
+        let shouldMeasureFolder = item.isNavigable
+            && !item.isSymbolicLink
+            && AppPreferences.shared.calculateFolderSizes
+            && !FolderSizeCalculator.shouldSkipAutomaticMeasurement(item.url)
+
         var rows: [(String, String)] = []
         let sizeText: String
         if item.isNavigable {
-            sizeText = cachedFolderSize.map { "\(L10n.byteCount($0.bytes)) (\($0.itemCount.formatted(.number.locale(L10n.locale))) files)" } ?? L10n.text("Calculating…")
+            if let cachedFolderSize {
+                sizeText = formatFolderSize(cachedFolderSize)
+            } else if shouldMeasureFolder {
+                sizeText = L10n.text("Calculating…")
+            } else {
+                sizeText = "—"
+            }
         } else {
             sizeText = item.size.map { L10n.byteCount($0) } ?? "—"
         }
@@ -258,25 +311,17 @@ final class PreviewInspectorController: NSViewController {
 
         loadPreviewContent(for: item, generation: generation)
 
-        if item.isNavigable && !item.isSymbolicLink && cachedFolderSize == nil {
+        // When viewing currentFolder while BrowserViewController is already calculating child folders,
+        // wait for the aggregated child total instead of traversing the entire tree a second time.
+        if shouldMeasureFolder && cachedFolderSize == nil && !(isCurrentFolder && deferSizeCalculation) {
             let targetURL = item.url
             let modDate = item.modified
             sizeTask = Task { [weak self] in
-                if let cached = await FolderSizeCache.shared.cached(for: targetURL, modified: modDate) {
-                    await MainActor.run { [weak self] in
-                        guard let self, self.generation == generation else { return }
-                        self.sizeValueLabel?.stringValue = "\(L10n.byteCount(cached.bytes)) (\(cached.itemCount.formatted(.number.locale(L10n.locale))) files)"
-                    }
-                    return
-                }
-                let measured = await Task.detached(priority: .utility) {
-                    try? FolderSizeCalculator.measure(targetURL)
-                }.value
+                let measured = await FolderSizeCache.shared.measureIfNeeded(for: targetURL, modified: modDate)
                 guard !Task.isCancelled, let measured else { return }
-                await FolderSizeCache.shared.store(measured, for: targetURL, modified: modDate)
                 await MainActor.run { [weak self] in
                     guard let self, self.generation == generation else { return }
-                    self.sizeValueLabel?.stringValue = "\(L10n.byteCount(measured.bytes)) (\(measured.itemCount.formatted(.number.locale(L10n.locale))) files)"
+                    self.sizeValueLabel?.stringValue = self.formatFolderSize(measured)
                 }
             }
         }

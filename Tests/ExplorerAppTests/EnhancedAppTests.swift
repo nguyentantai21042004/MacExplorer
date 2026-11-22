@@ -214,4 +214,30 @@ struct EnhancedAppTests {
         QuickJumpPanelController.shared.hide()
         window.close()
     }
+
+    @Test func pathBarShowsRealUsernameAndSidebarFavoritesUseSafeReorderPasteboard() throws {
+        _ = NSApplication.shared
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let pathBar = PathBar(frame: NSRect(x: 0, y: 0, width: 520, height: 30))
+        pathBar.update(home)
+
+        let buttons = pathBar.subviews
+            .compactMap { $0 as? NSStackView }
+            .flatMap(\.arrangedSubviews)
+            .compactMap { $0 as? ActionButton }
+        let titles = buttons.map(\.title).filter { !$0.isEmpty }
+        #expect(titles.contains("Users"))
+        #expect(titles.contains(home.lastPathComponent))
+        #expect(!titles.contains(L10n.text("Home")))
+
+        // Verify dragging a Favorite row writes ONLY the private favorite-id type, never .fileURL!
+        let sidebar = FolderSidebar()
+        _ = sidebar.view
+        let favSection = try #require(sidebar.outline.item(atRow: 0) as? FolderNode)
+        let firstFav = try #require(favSection.children?.first)
+        let writer = try #require(sidebar.outlineView(sidebar.outline, pasteboardWriterForItem: firstFav))
+        let pbItem = try #require(writer as? NSPasteboardItem)
+        #expect(pbItem.types.contains(NSPasteboard.PasteboardType("io.bquick.explorer.favorite-id")))
+        #expect(!pbItem.types.contains(.fileURL))
+    }
 }

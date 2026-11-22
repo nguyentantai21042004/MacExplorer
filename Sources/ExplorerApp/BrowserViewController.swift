@@ -117,9 +117,13 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     var watcherTabID: UUID?
     var refreshTask: Task<Void, Never>?
     var folderSizes: [String: FolderSizeResult] = [:]
+    var currentFolderSizeSummary: FolderSizeResult?
+    var isMeasuringFolderSizes = false
     var folderBranches: [String: String] = [:]
     var folderSizeTask: Task<Void, Never>?
     var gitStatusTask: Task<Void, Never>?
+    var searchLastApplied = ContinuousClock.now
+    var searchHasUnappliedMatches = false
     private var batchRenameSheet: BatchRenameSheetController?
     private weak var commandBarSurface: Surface?
     private weak var footerSurface: Surface?
@@ -540,7 +544,12 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         Task { [weak self] in
             let isDirectory = await Task.detached { (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }.value
             guard let self else { return }
-            self.newTab(url: isDirectory ? url : url.deletingLastPathComponent())
+            if isDirectory {
+                self.newTab(url: url)
+            } else {
+                self.newTab(url: url.deletingLastPathComponent())
+                self.tab.pendingSelections[self.tab.selectionKey] = [FileOperationController.itemPath(url)]
+            }
         }
     }
 
@@ -553,7 +562,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         let isGoogleDriveShortcut = StorageStore.shared.isGoogleDriveShortcut(url)
         tab.loadTask?.cancel(); tab.sortTask?.cancel(); refreshTask?.cancel()
         folderSizeTask?.cancel(); gitStatusTask?.cancel()
-        folderSizes = [:]; folderBranches = [:]; gitBadge.isHidden = true
+        folderSizes = [:]; currentFolderSizeSummary = nil; isMeasuringFolderSizes = false; folderBranches = [:]; gitBadge.isHidden = true
         tab.generation = UUID(); let generation = tab.generation
         tab.error = nil; tab.loading = true; tab.changedDuringLoad = false
         // Attach without blocking the UI; the watcher reconciles once it is ready.
@@ -674,6 +683,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
             let icon = iconCache.object(forKey: key) ?? FileColors.icon(item)
             iconCache.setObject(icon, forKey: key)
             cell.configure(item, query: tab.query, icon: icon, modified: item.modified.map(dateFormatter.string) ?? "—",
+                           folderSize: folderSizes[item.id]?.bytes,
                            dimmed: operations.cutPaths.contains(FileOperationController.itemPath(item.url)),
                            onReveal: { [weak self] in self?.revealInContainingFolder(item.url) })
             return cell
@@ -1001,70 +1011,106 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         } else {
             folderSizeTask?.cancel()
             folderSizes = [:]
+            currentFolderSizeSummary = nil
+            isMeasuringFolderSizes = false
             table.reloadData()
+            workspace?.updateInspector(from: self)
         }
     }
 
     func startFolderMetadataEnrichment(for items: [FileItem], currentFolder: URL, generation: UUID) {
         folderSizeTask?.cancel()
         gitStatusTask?.cancel()
+        currentFolderSizeSummary = nil
+        isMeasuringFolderSizes = false
 
-        gitStatusTask = Task { [weak self, weak tab] in
-            let status = await GitRepoReader.readStatus(for: currentFolder)
-            let branches = await Task.detached(priority: .utility) {
-                var map: [String: String] = [:]
-                for item in items where item.isNavigable && !item.isSymbolicLink {
-                    if let branch = GitRepoReader.readBranchFast(at: item.url) {
-                        map[item.id] = branch
+        let skipGitScan = FolderSizeCalculator.shouldSkipAutomaticMeasurement(currentFolder)
+        if !skipGitScan {
+            gitStatusTask = Task { [weak self, weak tab] in
+                let status = await GitRepoReader.readStatus(for: currentFolder)
+                let branches = await Task.detached(priority: .background) {
+                    var map: [String: String] = [:]
+                    for item in items where item.isNavigable && !item.isSymbolicLink {
+                        if let branch = GitRepoReader.readBranchFast(at: item.url) {
+                            map[item.id] = branch
+                        }
                     }
+                    return map
+                }.value
+                guard !Task.isCancelled, let self, let tab, self.tab === tab, tab.generation == generation else { return }
+                if let status {
+                    self.gitBadge.stringValue = "git: \(status.badgeText)"
+                    self.gitBadge.textColor = status.isClean ? Palette.accent : .systemOrange
+                    self.gitBadge.isHidden = false
+                } else {
+                    self.gitBadge.isHidden = true
                 }
-                return map
-            }.value
-            guard !Task.isCancelled, let self, let tab, self.tab === tab, tab.generation == generation else { return }
-            if let status {
-                self.gitBadge.stringValue = "git: \(status.badgeText)"
-                self.gitBadge.textColor = status.isClean ? Palette.accent : .systemOrange
-                self.gitBadge.isHidden = false
-            } else {
-                self.gitBadge.isHidden = true
-            }
-            if !branches.isEmpty {
-                self.folderBranches = branches
-                if self.viewMode == .details, let kindCol = self.table.column(withIdentifier: NSUserInterfaceItemIdentifier("kind")) as Int?, kindCol >= 0, self.table.numberOfRows > 0 {
-                    self.table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<self.table.numberOfRows), columnIndexes: IndexSet(integer: kindCol))
+                if !branches.isEmpty {
+                    self.folderBranches = branches
+                    if self.viewMode == .details, let kindCol = self.table.column(withIdentifier: NSUserInterfaceItemIdentifier("kind")) as Int?, kindCol >= 0, self.table.numberOfRows > 0 {
+                        self.table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<self.table.numberOfRows), columnIndexes: IndexSet(integer: kindCol))
+                    }
                 }
             }
         }
 
-        guard AppPreferences.shared.calculateFolderSizes else { return }
-        let folders = items.filter { $0.isNavigable && !$0.isSymbolicLink && (self.showHidden || !$0.isHidden) }
-        guard !folders.isEmpty else { return }
+        guard AppPreferences.shared.calculateFolderSizes,
+              !FolderSizeCalculator.shouldSkipAutomaticMeasurement(currentFolder) else { return }
+        let folders = items.filter {
+            $0.isNavigable && !$0.isSymbolicLink && (self.showHidden || !$0.isHidden)
+                && !FolderSizeCalculator.shouldSkipAutomaticMeasurement($0.url)
+        }
+        let directFiles = items.filter { !$0.isNavigable && !$0.isSymbolicLink }
+        let directFileBytes = directFiles.reduce(Int64(0)) { $0 + ($1.size ?? 0) }
+        let directFileCount = directFiles.count
+
+        if folders.isEmpty {
+            currentFolderSizeSummary = FolderSizeResult(bytes: directFileBytes, itemCount: directFileCount)
+            workspace?.updateInspectorFolderSizes(from: self)
+            return
+        }
+
+        isMeasuringFolderSizes = true
+        workspace?.updateInspector(from: self)
 
         folderSizeTask = Task { [weak self, weak tab] in
+            var aggregateBytes = directFileBytes
+            var aggregateCount = directFileCount
+            var allMeasured = true
+
             for folder in folders {
                 guard !Task.isCancelled else { return }
-                let cached = await FolderSizeCache.shared.cached(for: folder.url, modified: folder.modified)
-                let measured: FolderSizeResult?
-                if let cached {
-                    measured = cached
+                let measured = await FolderSizeCache.shared.measureIfNeeded(for: folder.url, modified: folder.modified)
+                guard !Task.isCancelled, let self, let tab, self.tab === tab, tab.generation == generation else { return }
+                if let measured {
+                    self.folderSizes[folder.id] = measured
+                    aggregateBytes += measured.bytes
+                    aggregateCount += measured.itemCount
+                    if let idx = tab.visible.firstIndex(where: { $0.id == folder.id }),
+                       let row = tab.displayIndex.row(forItem: idx),
+                       row < self.table.numberOfRows {
+                        if self.viewMode == .details {
+                            let sizeCol = self.table.column(withIdentifier: NSUserInterfaceItemIdentifier("size"))
+                            if sizeCol >= 0 {
+                                self.table.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: sizeCol))
+                            }
+                        } else if self.viewMode == .content, self.table.numberOfColumns > 0 {
+                            self.table.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+                        }
+                    }
+                    self.workspace?.updateInspectorFolderSizes(from: self)
                 } else {
-                    let target = folder.url
-                    measured = await Task.detached(priority: .utility) { try? FolderSizeCalculator.measure(target) }.value
-                    if let measured {
-                        await FolderSizeCache.shared.store(measured, for: folder.url, modified: folder.modified)
-                    }
+                    allMeasured = false
                 }
-                guard !Task.isCancelled, let measured, let self, let tab, self.tab === tab, tab.generation == generation else { return }
-                self.folderSizes[folder.id] = measured
-                if self.viewMode == .details,
-                   let idx = tab.visible.firstIndex(where: { $0.id == folder.id }),
-                   let row = tab.displayIndex.row(forItem: idx) {
-                    let sizeCol = self.table.column(withIdentifier: NSUserInterfaceItemIdentifier("size"))
-                    if sizeCol >= 0, row < self.table.numberOfRows {
-                        self.table.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: sizeCol))
-                    }
-                }
-                self.workspace?.updateInspector(from: self)
+            }
+
+            guard !Task.isCancelled, let self, let tab, self.tab === tab, tab.generation == generation else { return }
+            self.isMeasuringFolderSizes = false
+            if allMeasured && items.allSatisfy({ !$0.isNavigable || $0.isSymbolicLink || (!self.showHidden && $0.isHidden) || self.folderSizes[$0.id] != nil }) {
+                let summary = FolderSizeResult(bytes: aggregateBytes, itemCount: aggregateCount)
+                self.currentFolderSizeSummary = summary
+                await FolderSizeCache.shared.store(summary, for: currentFolder, modified: nil)
+                self.workspace?.updateInspectorFolderSizes(from: self)
             }
         }
     }

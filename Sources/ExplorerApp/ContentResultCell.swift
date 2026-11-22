@@ -33,12 +33,13 @@ final class ContentResultCell: NSTableCellView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(_ item: FileItem, query: String, icon: NSImage, modified: String, dimmed: Bool, onReveal: (() -> Void)? = nil) {
+    func configure(_ item: FileItem, query: String, icon: NSImage, modified: String, folderSize: Int64? = nil, dimmed: Bool, onReveal: (() -> Void)? = nil) {
         let path = item.url.deletingLastPathComponent().path
         SearchHighlight.apply(item.name, to: nameLabel, query: query)
         locationLabel.configure(path, query: query, file: item.url, onOpen: onReveal)
         modifiedLabel.stringValue = L10n.text("Date modified: %1$@", modified)
-        sizeLabel.stringValue = L10n.text("Size: ") + (item.size.map { L10n.byteCount($0) } ?? "—")
+        let displayBytes = item.isNavigable ? folderSize : item.size
+        sizeLabel.stringValue = L10n.text("Size: ") + (displayBytes.map { L10n.byteCount($0) } ?? "—")
         kindLabel.stringValue = L10n.text("Type: %1$@", item.kind)
         picture.image = icon
         alphaValue = dimmed ? 0.35 : item.isHidden ? 0.6 : 1

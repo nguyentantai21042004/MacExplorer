@@ -19,6 +19,7 @@ final class FolderNode: NSObject {
 
 @MainActor
 final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
+    private static let favoritePasteboardType = NSPasteboard.PasteboardType("io.bquick.explorer.favorite-id")
     let outline = FolderOutlineView()
     var onNavigate: ((URL) -> Void)?
     var onNewTab: ((URL) -> Void)?
@@ -46,7 +47,7 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("folder")); column.width = 215
         outline.addTableColumn(column); outline.outlineTableColumn = column
         outline.dataSource = self; outline.delegate = self
-        outline.registerForDraggedTypes([.fileURL])
+        outline.registerForDraggedTypes([Self.favoritePasteboardType, .fileURL])
         outline.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
         outline.setDraggingSourceOperationMask(.copy, forLocal: false)
         outline.setAccessibilityLabel(L10n.text("Folder tree"))
@@ -54,8 +55,10 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
         scroll.documentView = outline
         scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
         NSLayoutConstraint.activate([
-            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: view.topAnchor), scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            scroll.topAnchor.constraint(equalTo: view.topAnchor, constant: 4),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         rebuild()
         NotificationCenter.default.addObserver(self, selector: #selector(favoritesChanged), name: FavoriteStore.changed, object: nil)
@@ -251,15 +254,70 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
         onNavigate?(url)
     }
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
-        guard !FileOperationController.shared.busy, let url = (item as? FolderNode)?.url, url.isFileURL else { return nil }
+        guard let node = item as? FolderNode else { return nil }
+        if let favoriteID = node.favoriteID {
+            let pbItem = NSPasteboardItem()
+            pbItem.setString(favoriteID.uuidString, forType: Self.favoritePasteboardType)
+            return pbItem
+        }
+        guard !FileOperationController.shared.busy, let url = node.url, url.isFileURL else { return nil }
         return url as NSURL
     }
     func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo, proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
-        guard view.window?.attachedSheet == nil, let node = item as? FolderNode, let url = node.url, url.isFileURL else { return [] }
+        guard view.window?.attachedSheet == nil else { return [] }
+        let favoritesSection = roots.first
+
+        // Reordering an existing Favorite: NEVER perform a file move on disk.
+        if info.draggingPasteboard.string(forType: Self.favoritePasteboardType) != nil {
+            guard let favoritesSection else { return [] }
+            if let node = item as? FolderNode, node === favoritesSection, index >= 0 {
+                return .move
+            }
+            if let node = item as? FolderNode, node.favoriteID != nil,
+               let targetIdx = favoritesSection.children?.firstIndex(where: { $0 === node }) {
+                outlineView.setDropItem(favoritesSection, dropChildIndex: targetIdx)
+                return .move
+            }
+            return []
+        }
+
+        // Dropping a folder between Favorites rows pins it at that position.
+        if let favoritesSection, let node = item as? FolderNode, node === favoritesSection, index >= 0 {
+            let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+            let hasFolders = urls.contains { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            return hasFolders ? .copy : []
+        }
+
+        guard let node = item as? FolderNode, let url = node.url, url.isFileURL else { return [] }
         outlineView.setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
         return FileDrag.operation(info, to: url)
     }
     func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo, item: Any?, childIndex index: Int) -> Bool {
+        let favoritesSection = roots.first
+
+        if let rawID = info.draggingPasteboard.string(forType: Self.favoritePasteboardType),
+           let id = UUID(uuidString: rawID),
+           let favoritesSection,
+           let node = item as? FolderNode, node === favoritesSection, index >= 0 {
+            let items = FavoriteStore.shared.favorites.items
+            guard let currentIndex = items.firstIndex(where: { $0.id == id }) else { return false }
+            let targetIndex = index > currentIndex ? index - 1 : index
+            FavoriteStore.shared.move(id, to: targetIndex)
+            return true
+        }
+
+        if let favoritesSection, let node = item as? FolderNode, node === favoritesSection, index >= 0 {
+            let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+            let folders = urls.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            guard !folders.isEmpty else { return false }
+            var insertAt = index
+            for folder in folders {
+                FavoriteStore.shared.insert(folder, at: insertAt)
+                insertAt += 1
+            }
+            return true
+        }
+
         guard let url = (item as? FolderNode)?.url, url.isFileURL else { return false }
         return FileDrag.accept(info, to: url, window: view.window)
     }

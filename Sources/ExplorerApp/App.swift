@@ -62,7 +62,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if !ready { pendingURLs += urls }
         else if let current {
             for url in urls { current.browser.openExternal(url) }
-        } else { newWindow(urls: urls) }
+            current.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            newWindow(urls: urls)
+            NSApp.activate(ignoringOtherApps: true)
+        }
         sender.reply(toOpenOrPrint: .success)
     }
 

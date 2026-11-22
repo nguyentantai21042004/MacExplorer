@@ -450,14 +450,14 @@ final class PathBar: Surface, NSTextFieldDelegate {
         while current.path != "/" { chain.insert(current, at: 0); current.deleteLastPathComponent() }
         let root = ActionButton(symbol: "internaldrive", tooltip: "/") { [weak self] in self?.onNavigate?(URL(fileURLWithPath: "/")) }
         crumbs.addArrangedSubview(root)
-        if chain.count > 2 {
+        if chain.count > 4 {
             let ellipsis = ActionButton("…", tooltip: L10n.text("Edit full path")) { [weak self] in self?.beginEditing() }
-            crumbs.addArrangedSubview(ellipsis); chain = Array(chain.suffix(2))
+            crumbs.addArrangedSubview(ellipsis); chain = Array(chain.suffix(4))
         }
         for component in chain {
             let chevron = NSImageView(image: Palette.symbol("chevron.right", size: 9) ?? NSImage())
             chevron.contentTintColor = .tertiaryLabelColor; crumbs.addArrangedSubview(chevron)
-            let name = component.path == FileManager.default.homeDirectoryForCurrentUser.path ? L10n.text("Home") : component.lastPathComponent
+            let name = component.lastPathComponent
             let button = ActionButton(name, tooltip: component.path, maximumWidth: 140) { [weak self] in self?.onNavigate?(component) }
             button.lineBreakMode = .byTruncatingMiddle
             crumbs.addArrangedSubview(button)
@@ -727,18 +727,32 @@ final class DirectoryWatcher {
     private var opening: Task<Void, Never>?
     private(set) var needsRetry = false
     init(url: URL, changed: @escaping @MainActor () -> Void) {
+        let startedAt = Date()
         // Opening a protected or unavailable network directory can wait inside the kernel.
         // Never let that prevent the window (or a macOS access prompt) from appearing.
         opening = Task { [weak self] in
-            let fd = await Task.detached(priority: .utility) { open(url.path, O_EVTONLY | O_NONBLOCK) }.value
-            guard let self, !Task.isCancelled else { if fd >= 0 { close(fd) }; return }
-            guard fd >= 0 else { self.needsRetry = true; return }
+            let result: (fd: Int32, modifiedAfterStart: Bool) = await Task.detached(priority: .utility) {
+                let fd = open(url.path, O_EVTONLY | O_NONBLOCK)
+                guard fd >= 0 else { return (-1, false) }
+                var st = stat()
+                var changedWhileOpening = false
+                if fstat(fd, &st) == 0 {
+                    let mod = Date(timeIntervalSince1970: Double(st.st_mtimespec.tv_sec) + Double(st.st_mtimespec.tv_nsec) / 1_000_000_000)
+                    changedWhileOpening = mod > startedAt
+                }
+                return (fd, changedWhileOpening)
+            }.value
+            guard let self, !Task.isCancelled else { if result.fd >= 0 { close(result.fd) }; return }
+            guard result.fd >= 0 else { self.needsRetry = true; return }
+            let fd = result.fd
             let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd,
                 eventMask: [.write, .delete, .rename, .attrib, .revoke], queue: .main)
             source.setEventHandler { MainActor.assumeIsolated { changed() } }
             source.setCancelHandler { close(fd) }
             self.source = source; source.resume()
-            changed() // Reconcile changes between the initial scan and attaching the watcher.
+            if result.modifiedAfterStart {
+                changed() // Reconcile only if the directory actually changed while attaching.
+            }
         }
     }
     deinit { opening?.cancel(); source?.cancel() }

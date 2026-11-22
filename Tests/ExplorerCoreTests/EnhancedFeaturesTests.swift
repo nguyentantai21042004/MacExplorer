@@ -120,4 +120,57 @@ struct EnhancedFeaturesTests {
         #expect(foundRoot?.standardizedFileURL.path == root.standardizedFileURL.path)
         #expect(GitRepoReader.readBranchFast(at: root) == "feat/custom-ui")
     }
+
+    @Test func favoritesReorderAndInsertAtPosition() {
+        let a = Favorite(url: URL(fileURLWithPath: "/tmp/A"))
+        let b = Favorite(url: URL(fileURLWithPath: "/tmp/B"))
+        let c = Favorite(url: URL(fileURLWithPath: "/tmp/C"))
+        var favs = Favorites([a, b, c])
+
+        favs.move(c.id, to: 0)
+        #expect(favs.items.map(\.name) == ["C", "A", "B"])
+
+        favs.move(c.id, to: 2)
+        #expect(favs.items.map(\.name) == ["A", "B", "C"])
+
+        let d = URL(fileURLWithPath: "/tmp/D")
+        favs.insert(d, at: 1)
+        #expect(favs.items.map(\.name) == ["A", "D", "B", "C"])
+
+        // Re-inserting an existing URL moves it instead of duplicating.
+        favs.insert(d, at: 4)
+        #expect(favs.items.map(\.name) == ["A", "B", "C", "D"])
+    }
+
+    @Test func directorySearchSkipsNoisyBuildDirsByDefaultAndCoalescesFolderSizes() async throws {
+        actor Collector {
+            var items: [FileItem] = []
+            func append(_ matches: [FileItem]) { items.append(contentsOf: matches) }
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("explorer-skip-\(UUID())")
+        let nm = root.appendingPathComponent("node_modules/pkg")
+        let src = root.appendingPathComponent("src")
+        try FileManager.default.createDirectory(at: nm, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: src, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try Data("export const needle = 1".utf8).write(to: nm.appendingPathComponent("index.js"))
+        try Data("export const needle = 2".utf8).write(to: src.appendingPathComponent("app.js"))
+
+        let defaultCollector = Collector()
+        _ = try await DirectorySearch.run(root: root, query: "content:needle") { update in
+            await defaultCollector.append(update.matches)
+        }
+        #expect(await defaultCollector.items.map(\.name) == ["app.js"])
+
+        #expect(FolderSizeCalculator.shouldSkipAutomaticMeasurement(URL(fileURLWithPath: "/")))
+        #expect(FolderSizeCalculator.shouldSkipAutomaticMeasurement(URL(fileURLWithPath: "/System")))
+        #expect(!FolderSizeCalculator.shouldSkipAutomaticMeasurement(root))
+
+        let cache = FolderSizeCache()
+        let first = await cache.measureIfNeeded(for: src, modified: nil)
+        let second = await cache.measureIfNeeded(for: src, modified: nil)
+        #expect(first == second)
+        #expect(first?.itemCount == 1)
+    }
 }
