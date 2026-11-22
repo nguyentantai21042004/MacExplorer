@@ -332,7 +332,14 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     func buildFileTable() {
-        detailsHeaderView = table.headerView
+        let defaultHeaderFrame = table.headerView?.frame ?? NSRect(x: 0, y: 0, width: 0, height: 28)
+        let tableHeader = ExplorerTableHeaderView(frame: defaultHeaderFrame)
+        table.headerView = tableHeader
+        detailsHeaderView = tableHeader
+        let corner = Surface()
+        corner.color = Palette.surface
+        corner.border = true
+        table.cornerView = corner
         tableScroll.contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(contentTableResized(_:)), name: NSView.frameDidChangeNotification, object: tableScroll.contentView)
         table.rowHeight = 29; table.floatsGroupRows = false; table.intercellSpacing = NSSize(width: 0, height: 1)
@@ -348,11 +355,13 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
         for (key, title, width) in [("name", L10n.text("Name"), 360.0), ("modified", L10n.text("Date modified"), 175.0), ("kind", L10n.text("Type"), 140.0), ("size", L10n.text("Size"), 98.0), ("location", L10n.text("Folder"), 180.0), ("created", L10n.text("Date created"), 185.0)] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(key))
+            let headerCell = CenteredTableHeaderCell(textCell: title)
+            headerCell.font = .systemFont(ofSize: 11, weight: .medium)
+            headerCell.alignment = .center
+            column.headerCell = headerCell
             column.title = title; column.width = width; column.minWidth = key == "name" ? 160 : (key == "size" ? 86 : 60)
-            column.headerCell.font = .systemFont(ofSize: 11)
             if key != "location" { column.sortDescriptorPrototype = NSSortDescriptor(key: key, ascending: true) }
             column.isHidden = key == "location" || key == "created"
-            if key == "size" { column.headerCell.alignment = .right }
             table.addTableColumn(column)
         }
         // Set the restored order before installing the delegate: initialization
@@ -990,6 +999,10 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         paneHeader?.color = Palette.chrome
         table.backgroundColor = Palette.surface
         tableScroll.backgroundColor = Palette.surface
+        (table.cornerView as? Surface)?.color = Palette.surface
+        table.cornerView?.needsDisplay = true
+        table.headerView?.needsDisplay = true
+        detailsHeaderView?.needsDisplay = true
         collection.backgroundColors = [Palette.surface]
         thisMacView.refreshTheme()
         gitBadge.textColor = Palette.accent

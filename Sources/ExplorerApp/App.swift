@@ -393,8 +393,26 @@ final class ExplorerWindow: NSWindow {
     weak var workspace: WorkspaceViewController?
     weak var tabStripView: NSView?
     private weak var pressedTab: BrowserTabView?
+    private var isAligningWindowControls = false
+    func alignWindowControlsIfNeeded() {
+        guard !styleMask.contains(.fullScreen),
+              let tab = workspace?.left.tabs.first.flatMap({ workspace?.left.tabChips[$0.id] }),
+              !tab.isHiddenOrHasHiddenAncestor,
+              !(contentView.map { tab.isDescendant(of: $0) } ?? false) else { return }
+        alignWindowControls(with: tab)
+    }
     func alignWindowControls(with tabView: NSView) {
-        guard !styleMask.contains(.fullScreen), tabView.window === self, tabView.bounds.height > 0 else { return }
+        guard !isAligningWindowControls,
+              !styleMask.contains(.fullScreen),
+              tabView.window === self,
+              tabView.bounds.height > 0 else { return }
+        isAligningWindowControls = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer {
+            CATransaction.commit()
+            isAligningWindowControls = false
+        }
         // Keep the real AppKit controls, horizontal spacing and native actions.
         // Convert from the tab body so its top padding is included in alignment.
         for kind: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
@@ -403,6 +421,14 @@ final class ExplorerWindow: NSWindow {
             let y = center.y - button.frame.height / 2
             if abs(button.frame.minY - y) > 0.01 { button.setFrameOrigin(NSPoint(x: button.frame.minX, y: y)) }
         }
+    }
+    override func layoutIfNeeded() {
+        super.layoutIfNeeded()
+        alignWindowControlsIfNeeded()
+    }
+    override func displayIfNeeded() {
+        alignWindowControlsIfNeeded()
+        super.displayIfNeeded()
     }
     func contentHit(at location: NSPoint) -> NSView? {
         // Native titlebar accessories live outside contentView's hierarchy.
@@ -513,23 +539,24 @@ final class ExplorerWindowController: NSWindowController, NSWindowDelegate {
     private func updateTitlebarLayout() {
         workspace.updateTitlebarLayout()
         workspace.titlebarTabs.layoutSubtreeIfNeeded()
-        if !titlebarAccessory.isHidden,
-           let tab = workspace.left.tabs.first.flatMap({ workspace.left.tabChips[$0.id] }) {
-            (window as? ExplorerWindow)?.alignWindowControls(with: tab)
+        if !titlebarAccessory.isHidden {
+            (window as? ExplorerWindow)?.alignWindowControlsIfNeeded()
         }
     }
     private func scheduleTitlebarLayout() {
         guard !titlebarLayoutPending else { return }
         titlebarLayoutPending = true
-        // AppKit may resize its accessory during this update pass.
+        // Used only after fullscreen transitions where AppKit finishes accessory sizing asynchronously.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.titlebarLayoutPending = false
             self.updateTitlebarLayout()
         }
     }
-    func windowDidUpdate(_ notification: Notification) { scheduleTitlebarLayout() }
-    func windowDidResize(_ notification: Notification) { scheduleTitlebarLayout() }
+    func windowDidUpdate(_ notification: Notification) { updateTitlebarLayout() }
+    func windowDidResize(_ notification: Notification) { updateTitlebarLayout() }
+    func windowWillStartLiveResize(_ notification: Notification) { updateTitlebarLayout() }
+    func windowDidEndLiveResize(_ notification: Notification) { updateTitlebarLayout() }
     func windowWillEnterFullScreen(_ notification: Notification) {
         // Keep tabs visible when macOS retracts its fullscreen titlebar.
         workspace.embedTitlebarForFullScreen(); titlebarAccessory.isHidden = true
@@ -538,11 +565,13 @@ final class ExplorerWindowController: NSWindowController, NSWindowDelegate {
     func windowDidExitFullScreen(_ notification: Notification) {
         window?.toolbar?.isVisible = true
         titlebarAccessory.isHidden = false; workspace.installTitlebar(in: titlebarAccessory.view)
+        updateTitlebarLayout()
         scheduleTitlebarLayout()
     }
     func windowDidFailToEnterFullScreen(_ window: NSWindow) {
         window.toolbar?.isVisible = true
         titlebarAccessory.isHidden = false; workspace.installTitlebar(in: titlebarAccessory.view)
+        updateTitlebarLayout()
         scheduleTitlebarLayout()
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {

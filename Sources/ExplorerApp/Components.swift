@@ -702,6 +702,182 @@ final class SuggestionTableView: NSTableView {
 }
 
 @MainActor
+final class ExplorerTableHeaderView: NSTableHeaderView {
+    override func draw(_ dirtyRect: NSRect) {
+        Palette.surface.setFill()
+        dirtyRect.fill()
+        super.draw(dirtyRect)
+        // Cover any trailing header space to the right of the last visible column
+        // with the theme surface so custom themes never show a mismatched strip.
+        if draggedColumn == -1, let tableView {
+            let lastVisible = tableView.tableColumns.indices.reversed().first { !tableView.tableColumns[$0].isHidden }
+            let trailingStart = lastVisible.map { headerRect(ofColumn: $0).maxX } ?? 0
+            if trailingStart < bounds.maxX {
+                let trailingRect = NSRect(x: trailingStart, y: bounds.minY, width: bounds.maxX - trailingStart, height: bounds.height)
+                if trailingRect.intersects(dirtyRect) {
+                    Palette.surface.setFill()
+                    trailingRect.intersection(dirtyRect).fill()
+                }
+            }
+        }
+        let pixel = 1 / (window?.backingScaleFactor ?? 2)
+        Palette.line.setFill()
+        NSRect(x: dirtyRect.minX, y: bounds.maxY - pixel, width: dirtyRect.width, height: pixel).fill()
+    }
+}
+
+@MainActor
+final class CenteredTableHeaderCell: NSTableHeaderCell {
+    private static let sortIndicatorWidth: CGFloat = 14
+    private static let sortIndicatorTrailingMargin: CGFloat = 6
+    private static let horizontalPadding: CGFloat = 6
+    private static let sortIndicatorGap: CGFloat = 4
+
+    override init(textCell string: String) {
+        super.init(textCell: string)
+        alignment = .center
+        lineBreakMode = .byTruncatingTail
+        font = .systemFont(ofSize: 11, weight: .medium)
+    }
+
+    required init(coder: NSCoder) {
+        super.init(coder: coder)
+        alignment = .center
+        lineBreakMode = .byTruncatingTail
+    }
+
+    private func primarySortAscending(in controlView: NSView?) -> Bool? {
+        guard let headerView = controlView as? NSTableHeaderView,
+              let tableView = headerView.tableView,
+              let descriptor = tableView.sortDescriptors.first,
+              let primaryKey = descriptor.key,
+              let column = tableView.tableColumns.first(where: { $0.headerCell === self }),
+              column.sortDescriptorPrototype?.key == primaryKey else {
+            return nil
+        }
+        return descriptor.ascending
+    }
+
+    private func isPrimarySorted(in controlView: NSView?) -> Bool {
+        primarySortAscending(in: controlView) != nil
+    }
+
+    private func shouldDrawTrailingSeparator(in controlView: NSView?) -> Bool {
+        guard let headerView = controlView as? NSTableHeaderView,
+              let tableView = headerView.tableView else {
+            return true
+        }
+        return tableView.tableColumns.last(where: { !$0.isHidden })?.headerCell !== self
+    }
+
+    private func styledTitle(sorted: Bool) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = lineBreakMode
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: sorted ? NSColor.labelColor : NSColor.secondaryLabelColor,
+            .paragraphStyle: paragraph
+        ]
+        return NSAttributedString(string: stringValue, attributes: attributes)
+    }
+
+    override func sortIndicatorRect(forBounds theRect: NSRect) -> NSRect {
+        let width = min(Self.sortIndicatorWidth, theRect.width)
+        let x = max(theRect.minX, theRect.maxX - Self.sortIndicatorTrailingMargin - width)
+        return NSRect(x: x, y: theRect.minY, width: width, height: theRect.height)
+    }
+
+    func centeredTitleRect(forBounds bounds: NSRect, sorted: Bool, scale: CGFloat = 2) -> NSRect {
+        let title = styledTitle(sorted: sorted)
+        let textSize = title.size()
+        let leftLimit = bounds.minX + Self.horizontalPadding
+        let rightLimit = sorted
+            ? min(bounds.maxX - Self.horizontalPadding, sortIndicatorRect(forBounds: bounds).minX - Self.sortIndicatorGap)
+            : bounds.maxX - Self.horizontalPadding
+        let availableWidth = max(0, rightLimit - leftLimit)
+
+        let naturalWidth = ceil(textSize.width)
+        let centeredMinX = bounds.midX - naturalWidth / 2
+        let centeredMaxX = bounds.midX + naturalWidth / 2
+
+        let x: CGFloat
+        let width: CGFloat
+        if naturalWidth <= availableWidth && centeredMinX >= leftLimit && centeredMaxX <= rightLimit {
+            x = bounds.minX + Self.horizontalPadding
+            width = max(0, bounds.width - Self.horizontalPadding * 2)
+        } else {
+            x = leftLimit
+            width = availableWidth
+        }
+
+        let textHeight = ceil(textSize.height)
+        let rawY = bounds.minY + (bounds.height - textHeight) / 2
+        let y = round(rawY * scale) / scale
+        return NSRect(x: x, y: y, width: width, height: min(textHeight, bounds.height))
+    }
+
+    override func titleRect(forBounds theRect: NSRect) -> NSRect {
+        centeredTitleRect(forBounds: theRect, sorted: false)
+    }
+
+    override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
+        Palette.surface.setFill()
+        cellFrame.fill()
+
+        if isHighlighted {
+            NSColor.labelColor.withAlphaComponent(0.06).setFill()
+            cellFrame.fill()
+        }
+
+        let scale = controlView.window?.backingScaleFactor ?? 2
+        let pixel = 1 / scale
+
+        if shouldDrawTrailingSeparator(in: controlView) {
+            Palette.line.withAlphaComponent(0.8).setFill()
+            let insetY: CGFloat = 5
+            let sepHeight = max(0, cellFrame.height - insetY * 2)
+            NSRect(x: cellFrame.maxX - pixel, y: cellFrame.minY + insetY, width: pixel, height: sepHeight).fill()
+        }
+
+        Palette.line.setFill()
+        NSRect(x: cellFrame.minX, y: cellFrame.maxY - pixel, width: cellFrame.width, height: pixel).fill()
+
+        drawInterior(withFrame: cellFrame, in: controlView)
+        if let ascending = primarySortAscending(in: controlView) {
+            drawSortIndicator(withFrame: cellFrame, in: controlView, ascending: ascending, priority: 0)
+        }
+    }
+
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        let sorted = isPrimarySorted(in: controlView)
+        let scale = controlView.window?.backingScaleFactor ?? 2
+        let rect = centeredTitleRect(forBounds: cellFrame, sorted: sorted, scale: scale)
+        guard rect.width > 0, rect.height > 0 else { return }
+        styledTitle(sorted: sorted).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+
+    override func drawSortIndicator(withFrame cellFrame: NSRect, in controlView: NSView, ascending: Bool, priority: Int) {
+        guard priority == 0 else { return }
+        let indicatorRect = sortIndicatorRect(forBounds: cellFrame)
+        let symbolName = ascending ? "chevron.up" : "chevron.down"
+        let config = NSImage.SymbolConfiguration(pointSize: 9.5, weight: .semibold)
+            .applying(.init(paletteColors: [.secondaryLabelColor]))
+        guard let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) else {
+            super.drawSortIndicator(withFrame: cellFrame, in: controlView, ascending: ascending, priority: priority)
+            return
+        }
+        let scale = controlView.window?.backingScaleFactor ?? 2
+        let size = symbol.size
+        let drawX = round((indicatorRect.midX - size.width / 2) * scale) / scale
+        let drawY = round((indicatorRect.midY - size.height / 2) * scale) / scale
+        let target = NSRect(x: drawX, y: drawY, width: size.width, height: size.height)
+        symbol.draw(in: target, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    }
+}
+
+@MainActor
 final class FileTableView: NSTableView {
     var onOpen: (() -> Void)?
     var onBack: (() -> Void)?

@@ -269,4 +269,42 @@ struct EnhancedAppTests {
         // Verify icon instances are shared by reference from the bounded NSCache.
         #expect(img1 === img2)
     }
+
+    @Test func fileTableColumnHeadersAreCenteredAndClearSortIndicator() throws {
+        _ = NSApplication.shared
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Explorer-Headers-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let browser = BrowserViewController(urls: [dir], active: 0)
+        _ = browser.view
+        defer { browser.suspend() }
+
+        #expect(browser.table.headerView is ExplorerTableHeaderView)
+        #expect(browser.detailsHeaderView === browser.table.headerView)
+        #expect(browser.table.tableColumns.count == 6)
+
+        for column in browser.table.tableColumns {
+            let cell = try #require(column.headerCell as? CenteredTableHeaderCell)
+            #expect(cell.alignment == .center)
+
+            let wideBounds = NSRect(x: 0, y: 0, width: max(column.width, 98), height: 28)
+            let unsortedRect = cell.centeredTitleRect(forBounds: wideBounds, sorted: false)
+            #expect(abs(unsortedRect.midX - wideBounds.midX) < 0.5)
+            #expect(abs(unsortedRect.midY - wideBounds.midY) <= 1.0)
+
+            let sortedRect = cell.centeredTitleRect(forBounds: wideBounds, sorted: true)
+            let indicatorRect = cell.sortIndicatorRect(forBounds: wideBounds)
+            #expect(abs(sortedRect.midY - wideBounds.midY) <= 1.0)
+            // On normal column widths, centered text stays centered and never overlaps the sort chevron.
+            #expect(abs(sortedRect.midX - wideBounds.midX) < 0.5)
+
+            // Even on a tight column width, the title rect stops before the sort indicator.
+            let tightBounds = NSRect(x: 0, y: 0, width: 70, height: 28)
+            let tightSortedRect = cell.centeredTitleRect(forBounds: tightBounds, sorted: true)
+            let tightIndicatorRect = cell.sortIndicatorRect(forBounds: tightBounds)
+            #expect(tightSortedRect.maxX < tightIndicatorRect.minX)
+            #expect(indicatorRect.maxX <= wideBounds.maxX)
+        }
+    }
 }

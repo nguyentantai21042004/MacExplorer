@@ -1,4 +1,5 @@
 import AppKit
+import ExplorerCore
 import Testing
 @testable import ExplorerApp
 
@@ -112,6 +113,34 @@ struct TabHitTestingTests {
         for tab in [tabs[0], tabs[2], tabs[3]] {
             let point = tab.convert(NSPoint(x: 70, y: 15), to: nil)
             #expect(window.contentHit(at: point) === tab)
+        }
+    }
+
+    @Test func trafficLightControlsStayAlignedSynchronouslyDuringWindowResize() throws {
+        _ = NSApplication.shared
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Explorer-TitlebarResize-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let controller = ExplorerWindowController(session: WorkspaceSession(left: PaneSession(paths: [dir.path])))
+        let window = try #require(controller.window as? ExplorerWindow)
+        defer {
+            controller.workspace.shutdown()
+            window.close()
+        }
+
+        let tab = try #require(controller.workspace.left.tabs.first.flatMap { controller.workspace.left.tabChips[$0.id] })
+        for size in [NSSize(width: 960, height: 600), NSSize(width: 1180, height: 720), NSSize(width: 1020, height: 640)] {
+            var frame = window.frame
+            frame.size = size
+            window.setFrame(frame, display: true)
+            window.layoutIfNeeded()
+            let tabCenter = tab.convert(NSPoint(x: tab.bounds.midX, y: tab.bounds.midY), to: nil)
+            for kind: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+                let button = try #require(window.standardWindowButton(kind))
+                let buttonCenter = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+                #expect(abs(buttonCenter.y - tabCenter.y) < 0.01)
+            }
         }
     }
 }
