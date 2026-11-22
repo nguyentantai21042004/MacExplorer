@@ -58,8 +58,7 @@ struct PreferencesTests {
         defer { defaults.removePersistentDomain(forName: name) }
         let preferences = AppPreferences(defaults: defaults)
         let controller = SettingsWindowController(preferences: preferences,
-                                                  shortcutController: GlobalShortcutController(registrar: FakeRegistrar()),
-                                                  updates: AppUpdateController())
+                                                  shortcutController: GlobalShortcutController(registrar: FakeRegistrar()))
         let tabs = try #require(controller.window?.contentViewController as? NSTabViewController)
         let general = try #require(tabs.tabViewItems.first?.viewController?.view)
         let stack = try #require(general.subviews.first as? NSStackView)
@@ -120,6 +119,22 @@ struct PreferencesTests {
         #expect(bindingController.activeID == nil)
         #expect(bindingController.activeShortcut == nil)
         #expect(registrar.registrations.isEmpty)
+    }
+
+    @Test func migrationPreservesUserChoicesAndDoesNotRepeat() throws {
+        let session = Data("saved tabs".utf8)
+        let legacy: [String: Any] = ["explorer.session.v2": session, "explorer.appearance": "dark", "explorer.shortcut.enabled": false,
+                                     "UnrelatedPreference": "ignore", "SUFeedURL": "https://unexpected.test"]
+        let current: [String: Any] = ["explorer.appearance": "light", "NewPreference": "keep"]
+        let migrated = PreferenceMigration.migratedDomain(current: current, legacy: legacy)
+        #expect(migrated["explorer.session.v2"] as? Data == session)
+        #expect(migrated["explorer.appearance"] as? String == "light")
+        #expect(migrated["explorer.shortcut.enabled"] as? Bool == false)
+        #expect(migrated["NewPreference"] as? String == "keep")
+        #expect(migrated["UnrelatedPreference"] == nil)
+        #expect(migrated["SUFeedURL"] == nil)
+        let repeatMigration = PreferenceMigration.migratedDomain(current: migrated, legacy: ["explorer.new": true])
+        #expect(repeatMigration["explorer.new"] == nil)
     }
 }
 

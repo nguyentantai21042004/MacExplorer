@@ -26,7 +26,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var settings: SettingsWindowController?
     private var about: AboutWindowController?
     private let crashReportExporter = CrashReportExporter()
-    private lazy var updates = AppUpdateController()
     var current: ExplorerWindowController? {
         (NSApp.keyWindow?.windowController as? ExplorerWindowController) ?? (NSApp.mainWindow?.windowController as? ExplorerWindowController) ?? windows.last
     }
@@ -56,7 +55,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             newWindow()
         }
         NSApp.activate(ignoringOtherApps: true)
-        updates.start()
     }
 
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
@@ -141,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
     @objc func showSettings(_ sender: Any?) {
         if settings == nil {
-            let controller = SettingsWindowController(shortcutController: globalShortcut, updates: updates)
+            let controller = SettingsWindowController(shortcutController: globalShortcut)
             if Bundle.main.bundleURL.pathExtension == "app" {
                 controller.onLanguageRestart = { [weak self] in
                     self?.languageRestartRequested = true
@@ -152,7 +150,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         settings?.showWindow(nil); settings?.window?.makeKeyAndOrderFront(nil)
     }
-    @objc func checkForUpdates(_ sender: Any?) { updates.checkForUpdates(sender) }
     @objc func exportCrashReport() { crashReportExporter.start() }
     @objc func showAbout(_ sender: Any?) {
         if about == nil { about = AboutWindowController() }
@@ -243,7 +240,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        if item.action == #selector(checkForUpdates) { return updates.canCheck }
         if item.action == #selector(exportCrashReport) { return !crashReportExporter.exporting }
         if item.action == #selector(showAbout) || item.action == #selector(showSettings) || item.action == #selector(newWindowAction) { return true }
         if NSApp.keyWindow === settings?.window || NSApp.keyWindow === about?.window { return item.action == #selector(closeTab) }
@@ -286,7 +282,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let app = submenu("Explorer")
         add(app, L10n.text("About Explorer"), #selector(showAbout))
         add(app, L10n.text("Settings…"), #selector(showSettings), ",")
-        add(app, L10n.text("Check for Updates…"), #selector(checkForUpdates))
         app.addItem(.separator())
         add(app, L10n.text("Hide Explorer"), #selector(NSApplication.hide(_:)), "h", target: NSApp)
         add(app, L10n.text("Hide Others"), #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option], target: NSApp)

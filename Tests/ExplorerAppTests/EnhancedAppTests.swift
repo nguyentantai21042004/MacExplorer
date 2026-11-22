@@ -38,8 +38,12 @@ struct EnhancedAppTests {
 
         await browser.tab.loadTask?.value
         await browser.tab.sortTask?.value
-        await browser.gitStatusTask?.value
-        await browser.folderSizeTask?.value
+        for _ in 0..<40 where browser.gitBadge.isHidden || !browser.gitBadge.stringValue.contains("feature/enhanced-ui") {
+            await browser.tab.loadTask?.value
+            await browser.gitStatusTask?.value
+            if !browser.gitBadge.isHidden { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
 
         // Git badge should detect the branch and remain visible.
         #expect(!browser.gitBadge.isHidden)

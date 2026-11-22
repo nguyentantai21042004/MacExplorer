@@ -20,23 +20,21 @@ BUILD_ARGS=(-c release -debug-info-format none --disable-sandbox --cache-path "$
 if (( UNIVERSAL_BUILD )); then BUILD_ARGS+=(--arch arm64 --arch x86_64); fi
 swift build "${BUILD_ARGS[@]}"
 BIN_PATH=$(swift build "${BUILD_ARGS[@]}" --show-bin-path)
-SPARKLE_ROOT="$PROJECT_ROOT/.build/artifacts/sparkle/Sparkle"
-FRAMEWORK="$SPARKLE_ROOT/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
-[[ -d "$FRAMEWORK" ]] || { print -u2 'Sparkle framework is missing'; exit 1; }
 STAGING_ROOT=$(mktemp -d "$PROJECT_ROOT/.build/app-staging.XXXXXX")
 trap 'rm -rf "$STAGING_ROOT"' EXIT
 APP_STAGE="$STAGING_ROOT/Explorer.app"
-mkdir -p "$APP_STAGE/Contents/MacOS" "$APP_STAGE/Contents/Resources" "$APP_STAGE/Contents/Frameworks"
+mkdir -p "$APP_STAGE/Contents/MacOS" "$APP_STAGE/Contents/Resources"
 cp "$BIN_PATH/Explorer" "$APP_STAGE/Contents/MacOS/Explorer"
 cp Support/Info.plist "$APP_STAGE/Contents/Info.plist"
 ditto Sources/ExplorerCore/Resources/en.lproj "$APP_STAGE/Contents/Resources/en.lproj"
-ditto "$FRAMEWORK" "$APP_STAGE/Contents/Frameworks/Sparkle.framework"
 if [[ ! -f .build/AppIcon.icns || scripts/generate-icon.swift -nt .build/AppIcon.icns ]]; then
   swift -module-cache-path "$PROJECT_ROOT/.build/module-cache" scripts/generate-icon.swift "$PROJECT_ROOT/.build/AppIcon.iconset"
 fi
 cp .build/AppIcon.icns "$APP_STAGE/Contents/Resources/AppIcon.icns"
 cp LICENSE "$APP_STAGE/Contents/Resources/LICENSE.txt"
-ditto Support/Licenses "$APP_STAGE/Contents/Resources/Licenses"
+if [[ -d Support/Licenses ]]; then
+  ditto Support/Licenses "$APP_STAGE/Contents/Resources/Licenses"
+fi
 if (( RELEASE_BUILD )); then
   zsh scripts/sign-app.sh "$APP_STAGE" "$DEVELOPER_ID_APPLICATION"
   APP_PATH="$PROJECT_ROOT/build/release/Explorer.app"
