@@ -304,6 +304,7 @@ final class PreviewInspectorController: NSViewController {
             sizeText = item.size.map { L10n.byteCount($0) } ?? "—"
         }
         rows.append((L10n.text("Size"), sizeText))
+        if let cloudLabel = item.cloudStatus.displayLabel { rows.append(("Cloud", cloudLabel)) }
         if let modified = item.modified { rows.append((L10n.text("Modified"), dateFormatter.string(from: modified))) }
         if let created = item.created { rows.append((L10n.text("Created"), dateFormatter.string(from: created))) }
         rows.append((L10n.text("Path"), item.url.path))
@@ -335,12 +336,7 @@ final class PreviewInspectorController: NSViewController {
             let url = item.url
             previewTask = Task { [weak self] in
                 let snippet = await Task.detached(priority: .userInitiated) { () -> String? in
-                    guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-                    defer { try? handle.close() }
-                    let data = try? handle.read(upToCount: 32_768)
-                    guard let data, !data.prefix(1024).contains(0) else { return nil }
-                    let text = String(decoding: data, as: UTF8.self)
-                    return data.count == 32_768 ? text + "\n\n… (truncated at 32 KB)" : text
+                    PreviewText.snippet(of: url)
                 }.value
                 guard !Task.isCancelled, let self, self.generation == generation else { return }
                 if let snippet {

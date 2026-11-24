@@ -218,6 +218,12 @@ final class ThisMacView: NSView, NSCollectionViewDataSource, NSCollectionViewDel
         menu.addItem(ExternalApplications.terminalItem(folder: location.url, window: window))
         menu.addItem(.separator())
         menu.addItem(FileProperties.item(urls: [location.url], window: window))
+        if location.isEjectable {
+            menu.addItem(.separator())
+            menu.addItem(ContextMenu.item("Eject “\(location.title)”", symbol: "eject") { [weak self] in
+                VolumeActions.eject(location, window: self?.window)
+            })
+        }
     }
     @objc private func open() { openSelection() }
     @objc private func openInTab() { openSelection(newTab: true) }

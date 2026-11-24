@@ -27,7 +27,9 @@ final class FileOperationController {
     static let shared = FileOperationController()
     static let changed = Notification.Name("ExplorerFileOperationsChanged")
     static let finished = Notification.Name("ExplorerFileOperationsFinished")
-    private let engine = FileOperationEngine()
+    private let engine = FileOperationEngine(onTrashed: { trashed, original in
+        TrashJournal.shared.record(trashedURL: trashed, originalURL: original)
+    })
     private var task: Task<Void, Never>?
     private var cutChangeCount: Int?
     private var cutURLs: [URL] = []

@@ -23,7 +23,7 @@ public enum BatchRenamePlanner {
         var regexError: String?
         if case let .replace(find, _, true, caseSensitive) = mode, !find.isEmpty {
             do {
-                regex = try NSRegularExpression(pattern: find, options: caseSensitive ? [] : [.caseInsensitive])
+                regex = try SafeRegex.compile(find, options: caseSensitive ? [] : [.caseInsensitive])
             } catch {
                 regexError = error.localizedDescription
             }

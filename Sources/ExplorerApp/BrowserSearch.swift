@@ -18,10 +18,10 @@ extension BrowserViewController {
             search.toolTip = L10n.text("Filter drives and cloud folders by name or account"); return
         }
         let parsed = SearchQueryParser.parse(tab.query)
-        let recursive = tab.searchScope == .subfolders || parsed.contentQuery != nil
+        let recursive = tab.searchScope == .subfolders || parsed.contentQuery != nil || parsed.spotlightQuery != nil
         search.placeholderString = L10n.text("Search %1$@", title(for: tab.history.current))
         search.setAccessibilityLabel(recursive ? L10n.text("Search folder and subfolders") : L10n.text("Filter this folder"))
-        search.toolTip = L10n.text("Supports ext:go, size:>1mb, mod:<7d, type:folder, regex:..., content:...")
+        search.toolTip = L10n.text("Supports ext:go, size:>1mb, mod:<7d, type:folder, regex:..., content:..., spot:...")
     }
 
     func searchOptionsMenu() -> NSMenu {
@@ -113,6 +113,25 @@ extension BrowserViewController {
             guard !Task.isCancelled, let self, let tab, self.tab === tab, tab.searchGeneration == generation else { return }
             self.searchLastApplied = .now
             self.searchHasUnappliedMatches = false
+            let parsed = SearchQueryParser.parse(query)
+            if let spotQuery = parsed.spotlightQuery {
+                let result = await SpotlightSearch.run(
+                    query: spotQuery,
+                    filter: parsed,
+                    scopeURL: root.path == "/" ? nil : root,
+                    showHidden: hidden
+                )
+                guard !Task.isCancelled, self.tab === tab, tab.searchGeneration == generation else { return }
+                tab.searchScanned = result.scanned
+                tab.searchLimited = result.reachedLimit
+                tab.items = result.matches
+                tab.loading = false
+                tab.searchTask = nil
+                self.applyView()
+                self.updateStatus()
+                self.updateEmptyState()
+                return
+            }
             let worker = Task.detached(priority: .userInitiated) { [self, tab] in
                 try await DirectorySearch.run(root: root, query: query, showHidden: hidden) { update in
                     await MainActor.run { [self, tab] in
@@ -163,7 +182,7 @@ extension BrowserViewController {
     func suspend() {
         closeQuickLook(); cancelSearchWork(); tab.loadTask?.cancel(); tab.sortTask?.cancel(); refreshTask?.cancel()
         folderSizeTask?.cancel(); gitStatusTask?.cancel()
-        watcher = nil; watcherURL = nil; watcherTabID = nil; cancelVisibleThumbnails(); tab.loading = false
+        watcher = nil; watcherURL = nil; watcherTabID = nil; cancelVisibleThumbnails(); columnView.cancelTasks(); tab.loading = false
     }
     @objc func openContainingFolder() {
         guard let item = selectedItems.first else { return }

@@ -83,6 +83,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let terminalApplication = NSPopUpButton(), editorApplication = NSPopUpButton()
     private let folderDefaultButton = NSButton(title: L10n.text("Set as Default…"), target: nil, action: nil)
     private let folderDefaultStatus = NSTextField(wrappingLabelWithString: "")
+    private let revealViewerButton = NSButton(title: "Use Explorer for Reveal…", target: nil, action: nil)
+    private let revealViewerStatus = NSTextField(wrappingLabelWithString: "")
     private var changingFolderDefault = false
     private var folderDefaultFailure: String?
 
@@ -207,10 +209,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         folderDefaultButton.target = self; folderDefaultButton.action = #selector(changeFolderDefault)
         folderDefaultStatus.font = .systemFont(ofSize: 12); folderDefaultStatus.textColor = .secondaryLabelColor
         let folderDefaultControls = NSStackView(views: [folderDefaultButton, NSView()])
+        revealViewerButton.bezelStyle = .rounded
+        revealViewerButton.target = self; revealViewerButton.action = #selector(toggleRevealViewer)
+        revealViewerStatus.font = .systemFont(ofSize: 12); revealViewerStatus.textColor = .secondaryLabelColor
+        let revealViewerControls = NSStackView(views: [revealViewerButton, NSView()])
         return page(L10n.text("Open with your favorite apps"), subtitle: L10n.text("Choose your folder, terminal, and editor apps."), content: [
             row(L10n.text("Default app for folders"), control: folderDefaultControls),
             folderDefaultStatus,
-            note(L10n.text("This applies when an app opens a folder using the macOS default. Reveal in Finder still opens Finder.")),
+            row("Reveal in Finder (NSFileViewer)", control: revealViewerControls),
+            revealViewerStatus,
+            note("Routes “Reveal in Finder” calls from VS Code, Chrome, Raycast, and other macOS apps directly to Explorer without modifying macOS Finder."),
             row(L10n.text("Terminal"), control: terminalApplication),
             note(L10n.text("Open a folder in Terminal, iTerm2, or another terminal that supports opening folders. Right-click empty space to use the current folder.")),
             row(L10n.text("Text editor"), control: editorApplication),
@@ -333,6 +341,31 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         refreshFolderRulesStatus()
         refreshApplications()
         refreshFolderDefault()
+        refreshRevealViewer()
+    }
+    private func currentRevealViewerID() -> String? {
+        CFPreferencesCopyValue("NSFileViewer" as CFString, kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? String
+    }
+    private func refreshRevealViewer() {
+        let explorerID = Bundle.main.bundleIdentifier ?? "io.bquick.explorer"
+        let current = currentRevealViewerID()
+        let isExplorer = current == explorerID
+        revealViewerButton.title = isExplorer ? "Revert Reveal to Finder" : "Use Explorer for Reveal"
+        revealViewerButton.isEnabled = !DemoData.active && Bundle.main.bundleURL.pathExtension == "app"
+        if isExplorer {
+            revealViewerStatus.stringValue = "Explorer (\(explorerID)) handles “Reveal in Finder” calls. Restart other apps to pick up changes."
+        } else if let current, !current.isEmpty {
+            revealViewerStatus.stringValue = "\(current) currently handles “Reveal in Finder” calls."
+        } else {
+            revealViewerStatus.stringValue = "macOS Finder currently handles “Reveal in Finder” calls."
+        }
+    }
+    @objc private func toggleRevealViewer() {
+        let explorerID = Bundle.main.bundleIdentifier ?? "io.bquick.explorer"
+        let nextValue: CFPropertyList? = (currentRevealViewerID() == explorerID) ? nil : (explorerID as CFString)
+        CFPreferencesSetValue("NSFileViewer" as CFString, nextValue, kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        refreshRevealViewer()
     }
     private func refreshFolderRulesStatus() {
         let store = FolderRulesStore.shared

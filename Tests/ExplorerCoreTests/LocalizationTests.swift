@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import ExplorerCore
 
@@ -219,5 +220,95 @@ struct LocalizationTests {
         let english = L10n(language: .english, catalog: bundled)
         #expect(english.count("%lld items", 1) == "1 item")
         #expect(english.count("%lld items", 2) == "2 items")
+    }
+
+    @Test func adjacentPacksAreOnlyAutoLoadedFromTrustedApplicationsFolders() {
+        let home = URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        let userDir = URL(fileURLWithPath: "/Users/tester/Library/Application Support/Explorer/Localizations", isDirectory: true)
+
+        let downloads = LocalizationCatalog.defaultExternalDirectories(
+            bundleURL: home.appendingPathComponent("Downloads/Explorer.app"),
+            userDirectory: userDir,
+            homeDirectory: home
+        )
+        #expect(downloads == [userDir])
+
+        let tmpApp = LocalizationCatalog.defaultExternalDirectories(
+            bundleURL: URL(fileURLWithPath: "/tmp/Explorer.app"),
+            userDirectory: userDir,
+            homeDirectory: home
+        )
+        #expect(tmpApp == [userDir])
+
+        let systemApps = LocalizationCatalog.defaultExternalDirectories(
+            bundleURL: URL(fileURLWithPath: "/Applications/Explorer.app"),
+            userDirectory: userDir,
+            homeDirectory: home
+        )
+        #expect(systemApps.count == 3)
+        #expect(systemApps.last == userDir)
+        #expect(systemApps[0].path == "/Applications/Localizations")
+
+        let userApps = LocalizationCatalog.defaultExternalDirectories(
+            bundleURL: home.appendingPathComponent("Applications/Explorer.app"),
+            userDirectory: userDir,
+            homeDirectory: home
+        )
+        #expect(userApps.count == 3)
+        #expect(userApps.last == userDir)
+        #expect(userApps[0].path == "/Users/tester/Applications/Localizations")
+    }
+
+    @Test func symlinkedOversizedAndFifoLanguagePacksAreRejected() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("explorer-l10n-sec-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packsDir = root.appendingPathComponent("Packs")
+        let targetDir = root.appendingPathComponent("Outside/it.lproj")
+        try FileManager.default.createDirectory(at: packsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
+        try "\"Search\" = \"Cerca\";".write(to: targetDir.appendingPathComponent("Localizable.strings"), atomically: true, encoding: .utf8)
+
+        // 1. Symlinked .lproj directory
+        try FileManager.default.createSymbolicLink(
+            at: packsDir.appendingPathComponent("it.lproj"),
+            withDestinationURL: targetDir
+        )
+
+        // 2. Symlinked Localizable.strings inside a regular .lproj directory
+        let linkedFilePack = packsDir.appendingPathComponent("fr.lproj")
+        try FileManager.default.createDirectory(at: linkedFilePack, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: linkedFilePack.appendingPathComponent("Localizable.strings"),
+            withDestinationURL: targetDir.appendingPathComponent("Localizable.strings")
+        )
+
+        // 3. Oversized Localizable.strings (> 2 MB)
+        let hugePack = packsDir.appendingPathComponent("de.lproj")
+        try FileManager.default.createDirectory(at: hugePack, withIntermediateDirectories: true)
+        let padding = String(repeating: "a", count: LocalizationCatalog.maxResourceBytes + 64)
+        try "\"Search\" = \"\(padding)\";".write(to: hugePack.appendingPathComponent("Localizable.strings"), atomically: true, encoding: .utf8)
+
+        // 4. FIFO named Localizable.strings
+        let fifoPack = packsDir.appendingPathComponent("es.lproj")
+        try FileManager.default.createDirectory(at: fifoPack, withIntermediateDirectories: true)
+        #expect(mkfifo(fifoPack.appendingPathComponent("Localizable.strings").path, 0o600) == 0)
+
+        let catalog = LocalizationCatalog(externalDirectories: [packsDir])
+        #expect(catalog.languages == [.english])
+
+        let dest = root.appendingPathComponent("Installed")
+        #expect(try LocalizationCatalog.install(from: packsDir, into: dest) == false)
+
+        // 5. Valid Localizable.strings with symlinked LocalizationCredit.strings must abort install
+        let mixedPack = root.appendingPathComponent("Mixed/vi.lproj")
+        try FileManager.default.createDirectory(at: mixedPack, withIntermediateDirectories: true)
+        try "\"Search\" = \"Tìm kiếm\";".write(to: mixedPack.appendingPathComponent("Localizable.strings"), atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: mixedPack.appendingPathComponent("LocalizationCredit.strings"),
+            withDestinationURL: targetDir.appendingPathComponent("Localizable.strings")
+        )
+        #expect(throws: SafeFileReader.Failure.symbolicLink) {
+            _ = try LocalizationCatalog.install(from: mixedPack, into: dest)
+        }
     }
 }

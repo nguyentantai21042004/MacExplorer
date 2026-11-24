@@ -49,6 +49,21 @@ extension BrowserViewController {
         tab.displayIndex = FileDisplayIndex(groups: tab.groups, grouped: tab.grouping.key != .none, collapsedIDs: tab.collapsedGroups)
         suppressSelection = true; cancelVisibleThumbnails(); table.reloadData(); collection.reloadData()
         iconLayout.invalidateLayout()
+        if viewMode.usesColumns {
+            let targetIDs: Set<String>
+            if let pending {
+                targetIDs = Set(tab.visible.filter { pending.contains(FileOperationController.itemPath($0.url)) }.map(\.id))
+            } else {
+                targetIDs = selected
+            }
+            columnView.configureRoot(url: tab.history.current, items: tab.visible, sort: tab.sort, showHidden: showHidden, cutPaths: operations.cutPaths, selectedIDs: targetIDs)
+            tab.selections[tab.selectionKey] = Set(columnView.selectedItems.map(\.id))
+            tab.pendingSelections.removeValue(forKey: tab.selectionKey)
+            suppressSelection = false
+            updateStatus(); updateEmptyState(); updateQuickLookSelection()
+            workspace?.updateInspector(from: self)
+            return
+        }
         let indexes = tab.visible.enumerated().filter {
             tab.displayIndex.row(forItem: $0.offset) != nil && (pending?.contains(FileOperationController.itemPath($0.element.url)) ?? selected.contains($0.element.id))
         }.map(\.offset)

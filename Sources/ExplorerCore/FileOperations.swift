@@ -69,16 +69,19 @@ public actor FileOperationEngine {
     public typealias ResolveConflict = @Sendable (FileConflict) async -> ConflictResolution
     public typealias ReportProgress = @Sendable (OperationProgress) async -> Void
     public typealias TrashItem = @Sendable (URL) throws -> URL
+    public typealias TrashRecorded = @Sendable (URL, URL) -> Void
 
     private let fm = FileManager()
     private let trashItem: TrashItem
     private let volumeID: @Sendable (URL) throws -> UInt64
+    private let onTrashed: TrashRecorded?
     private var busy = false
     private var history: [UndoRecord] = []
 
     public init(trashItem: @escaping TrashItem = FileOperationEngine.systemTrash,
-                volumeID: @escaping @Sendable (URL) throws -> UInt64 = FileOperationEngine.fileVolume) {
-        self.trashItem = trashItem; self.volumeID = volumeID
+                volumeID: @escaping @Sendable (URL) throws -> UInt64 = FileOperationEngine.fileVolume,
+                onTrashed: TrashRecorded? = nil) {
+        self.trashItem = trashItem; self.volumeID = volumeID; self.onTrashed = onTrashed
     }
     public static func fileVolume(_ url: URL) throws -> UInt64 {
         let attributes = try FileManager().attributesOfItem(atPath: url.path)
@@ -177,6 +180,7 @@ public actor FileOperationEngine {
                 let original = try snapshot(source)
                 if case .trash = operation {
                     let trashed = try trashItem(source)
+                    onTrashed?(trashed, source)
                     record.steps.insert(.restore(trashed, source, try snapshot(trashed)), at: 0)
                     report.completed.append(source); report.consumedSources.append(source)
                     continue
@@ -230,7 +234,9 @@ public actor FileOperationEngine {
                     case .cancel: throw CancellationError()
                     case .skip: report.skipped += 1; continue
                     case .keepBoth: destination = uniqueCopy(of: destination, directory: original.isDirectory)
-                    case .replace: replacing = existing
+                    case .replace:
+                        try protectRoot(destination)
+                        replacing = existing
                     }
                 }
                 // The user may have left a conflict dialog open while another app edited either item.
@@ -436,8 +442,30 @@ public actor FileOperationEngine {
     private func failed(_ message: String) -> OperationReport {
         var report = OperationReport(); report.error = message; return report
     }
+    private static let protectedSystemPaths: Set<String> = [
+        "/", "/System", "/Library", "/Applications", "/Users", "/Volumes",
+        "/bin", "/sbin", "/usr", "/etc", "/var", "/tmp", "/dev",
+        "/private", "/private/etc", "/private/var", "/private/tmp"
+    ]
+
+    public static func isProtectedSystemPath(_ url: URL,
+                                             homePath: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
+        let path = url.standardizedFileURL.path
+        let normalizedHome = URL(fileURLWithPath: homePath).standardizedFileURL.path
+        let resolvedHome = URL(fileURLWithPath: homePath).resolvingSymlinksInPath().standardizedFileURL.path
+        if path == normalizedHome || path == resolvedHome || protectedSystemPaths.contains(path) {
+            return true
+        }
+        // Protect direct volume mount points like /Volumes/ExternalDisk without blocking files inside them.
+        if path.hasPrefix("/Volumes/") {
+            let remainder = path.dropFirst("/Volumes/".count)
+            if !remainder.isEmpty && !remainder.contains("/") { return true }
+        }
+        return false
+    }
+
     private func protectRoot(_ url: URL) throws {
-        guard url.path != "/", url.path != FileManager.default.homeDirectoryForCurrentUser.path else {
+        guard !Self.isProtectedSystemPath(url) else {
             throw FileOperationError(L10n.text("The startup root and your home folder cannot be changed by Explorer."))
         }
     }

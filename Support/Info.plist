@@ -9,12 +9,11 @@
   <key>CFBundleExecutable</key><string>Explorer</string>
   <key>CFBundleIdentifier</key><string>io.bquick.explorer</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.13.1</string>
-  <key>CFBundleVersion</key><string>31</string>
+  <key>CFBundleShortVersionString</key><string>0.14.0</string>
+  <key>CFBundleVersion</key><string>32</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>Explorer asks Finder to show the native Get Info window when you choose Properties.</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>CFBundleDocumentTypes</key><array><dict>
     <key>CFBundleTypeName</key><string>Folder</string>

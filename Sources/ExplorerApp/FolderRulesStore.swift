@@ -8,6 +8,8 @@ final class FolderRulesStore {
     static let shared = FolderRulesStore()
     static let changed = Notification.Name("ExplorerFolderRulesChanged")
 
+    static let maxConfigBytes = 512 * 1024
+
     static var defaultConfigURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/explorer/folder-rules.json")
@@ -78,9 +80,18 @@ final class FolderRulesStore {
             return
         }
         do {
-            let data = try Data(contentsOf: configURL)
+            let data = try SafeFileReader.readPrefix(of: configURL,
+                                                     limit: Self.maxConfigBytes,
+                                                     followSymlinks: true,
+                                                     maxFileSize: Int64(Self.maxConfigBytes))
             let decoded = try JSONDecoder().decode(FolderAppearanceRulesFile.self, from: data)
             matcher = FolderAppearanceMatcher(rules: decoded.rules)
+        } catch SafeFileReader.Failure.tooLarge {
+            lastError = "Config file exceeds 512 KB limit."
+            matcher = FolderAppearanceMatcher(rules: [])
+        } catch SafeFileReader.Failure.notRegularFile {
+            lastError = "Config path is not a regular file."
+            matcher = FolderAppearanceMatcher(rules: [])
         } catch {
             lastError = error.localizedDescription
             matcher = FolderAppearanceMatcher(rules: [])

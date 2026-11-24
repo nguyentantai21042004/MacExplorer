@@ -1,8 +1,9 @@
 import Foundation
 
 public enum FileViewMode: String, CaseIterable, Sendable {
-    case extraLarge, large, medium, small, details, content
+    case extraLarge, large, medium, small, details, content, columns
     public var usesTable: Bool { self == .details || self == .content }
+    public var usesColumns: Bool { self == .columns }
     public var title: String {
         switch self {
         case .extraLarge: L10n.text("Extra large icons")
@@ -11,6 +12,7 @@ public enum FileViewMode: String, CaseIterable, Sendable {
         case .small: L10n.text("Small icons")
         case .details: L10n.text("Details")
         case .content: L10n.text("Content")
+        case .columns: L10n.text("Columns")
         }
     }
     public var shortcutNumber: String {
@@ -20,6 +22,7 @@ public enum FileViewMode: String, CaseIterable, Sendable {
         case .medium: "3"
         case .small: "4"
         case .details: "6"
+        case .columns: "7"
         case .content: "8"
         }
     }
@@ -29,7 +32,7 @@ public enum FileViewMode: String, CaseIterable, Sendable {
         case .large: 96
         case .medium: 64
         case .small: 24
-        case .details: 18
+        case .details, .columns: 18
         case .content: 32
         }
     }

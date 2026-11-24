@@ -42,6 +42,26 @@ extension BrowserViewController: NSCollectionViewDataSource, NSCollectionViewDel
         collectionScroll.hasVerticalScroller = true; collectionScroll.hasHorizontalScroller = false
         collectionScroll.drawsBackground = false
     }
+    func buildColumnView() {
+        let menu = NSMenu(); menu.delegate = self
+        columnView.setContextMenu(menu)
+        columnView.onSelectionChange = { [weak self] in
+            guard let self, !self.suppressSelection else { return }
+            self.rememberSelection(); self.updateStatus()
+            self.workspace?.updateInspector(from: self)
+            Task { @MainActor [weak self] in self?.updateQuickLookSelection() }
+        }
+        columnView.onOpenItem = { [weak self] item, inNewTab in
+            guard let self else { return }
+            if item.isNavigable {
+                if inNewTab { self.newTab(url: item.url) } else { self.navigate(item.url) }
+            } else {
+                NSWorkspace.shared.open(item.url)
+            }
+        }
+        columnView.onPreview = { [weak self] in self?.toggleQuickLook() }
+        columnView.onNavigateUp = { [weak self] in self?.goUp() }
+    }
     func presentationMenu() -> NSMenu {
         let menu = NSMenu(); menu.addItem(withTitle: L10n.text("View"), action: nil, keyEquivalent: "")
         for mode in FileViewMode.allCases {
@@ -83,7 +103,9 @@ extension BrowserViewController: NSCollectionViewDataSource, NSCollectionViewDel
     }
     func applyPresentationMode() {
         thisMacView.isHidden = !tab.isThisMac
-        tableScroll.isHidden = tab.isThisMac || !viewMode.usesTable; collectionScroll.isHidden = tab.isThisMac || viewMode.usesTable
+        tableScroll.isHidden = tab.isThisMac || !viewMode.usesTable
+        collectionScroll.isHidden = tab.isThisMac || viewMode.usesTable || viewMode.usesColumns
+        columnView.isHidden = tab.isThisMac || !viewMode.usesColumns
         sortPicker.isEnabled = !tab.isThisMac; viewPicker.isEnabled = !tab.isThisMac; hiddenButton?.isEnabled = !tab.isThisMac
         table.tableColumn(withIdentifier: NSUserInterfaceItemIdentifier("location"))?.isHidden = !tab.isRecursiveSearch
         if tab.isRecursiveSearch {
@@ -96,9 +118,9 @@ extension BrowserViewController: NSCollectionViewDataSource, NSCollectionViewDel
         case .large: size = NSSize(width: 152, height: 154)
         case .medium: size = NSSize(width: 112, height: 120)
         case .small: size = NSSize(width: 210, height: 36)
-        case .details, .content: size = iconLayout.itemSize
+        case .details, .content, .columns: size = iconLayout.itemSize
         }
-        if tab.isRecursiveSearch && !viewMode.usesTable { size.height += 20 }
+        if tab.isRecursiveSearch && !viewMode.usesTable && !viewMode.usesColumns { size.height += 20 }
         if iconLayout.itemSize != size { iconLayout.itemSize = size; iconLayout.invalidateLayout() }
         for item in viewPicker.menu?.items ?? [] {
             if let mode = item.representedObject as? String { item.state = mode == viewMode.rawValue ? .on : .off }
@@ -132,7 +154,7 @@ extension BrowserViewController: NSCollectionViewDataSource, NSCollectionViewDel
         configureIcon(cell, at: indexPath); return cell
     }
     func configureIcon(_ cell: FileIconItem, at indexPath: IndexPath) {
-        guard let item = file(at: indexPath), !viewMode.usesTable else { cell.cancelThumbnail(); return }
+        guard let item = file(at: indexPath), !viewMode.usesTable, !viewMode.usesColumns else { cell.cancelThumbnail(); return }
         cell.onAccessibilityPress { [weak self] in
             guard let self else { return }
             self.collection.selectionIndexPaths = [indexPath]

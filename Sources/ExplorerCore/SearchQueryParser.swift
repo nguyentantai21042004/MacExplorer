@@ -29,22 +29,26 @@ public struct SearchFilter: Sendable, Equatable {
     public var itemKind: ItemKindFilter?
     public var regexPattern: String?
     public var contentQuery: String?
+    public var spotlightQuery: String?
+
+    public init() {}
 
     public var isEmpty: Bool {
         plainTerms.isEmpty && extensions.isEmpty && sizeComparison == nil &&
             modifiedAfter == nil && modifiedBefore == nil && itemKind == nil &&
-            regexPattern == nil && contentQuery == nil
+            regexPattern == nil && contentQuery == nil && spotlightQuery == nil
     }
 
     public var hasAdvancedTokens: Bool {
         !extensions.isEmpty || sizeComparison != nil || modifiedAfter != nil ||
-            modifiedBefore != nil || itemKind != nil || regexPattern != nil || contentQuery != nil
+            modifiedBefore != nil || itemKind != nil || regexPattern != nil ||
+            contentQuery != nil || spotlightQuery != nil
     }
 
     /// Plain text used for UI substring highlighting.
     public var highlightText: String {
         if !plainTerms.isEmpty { return plainTerms.joined(separator: " ") }
-        return contentQuery ?? ""
+        return contentQuery ?? spotlightQuery ?? ""
     }
 
     public func matchesMetadata(_ item: FileItem, regex: NSRegularExpression? = nil) -> Bool {
@@ -68,8 +72,7 @@ public struct SearchFilter: Sendable, Equatable {
             guard let modified = item.modified, modified <= modifiedBefore else { return false }
         }
         if let regex {
-            let range = NSRange(item.name.startIndex..<item.name.endIndex, in: item.name)
-            if regex.firstMatch(in: item.name, options: [], range: range) == nil { return false }
+            if !SafeRegex.matches(regex, in: item.name) { return false }
         }
         for term in plainTerms where !item.name.localizedStandardContains(term) {
             return false
@@ -79,7 +82,7 @@ public struct SearchFilter: Sendable, Equatable {
 
     public func compiledRegex() -> NSRegularExpression? {
         guard let regexPattern, !regexPattern.isEmpty else { return nil }
-        return try? NSRegularExpression(pattern: regexPattern, options: [.caseInsensitive])
+        return try? SafeRegex.compile(regexPattern, options: [.caseInsensitive])
     }
 }
 
@@ -118,6 +121,12 @@ public enum SearchQueryParser {
             } else if lower.hasPrefix("in:") {
                 let needle = String(token.dropFirst(3))
                 if !needle.isEmpty { filter.contentQuery = needle }
+            } else if lower.hasPrefix("spot:") {
+                let needle = String(token.dropFirst(5))
+                if !needle.isEmpty { filter.spotlightQuery = needle }
+            } else if lower.hasPrefix("spotlight:") {
+                let needle = String(token.dropFirst(10))
+                if !needle.isEmpty { filter.spotlightQuery = needle }
             } else {
                 filter.plainTerms.append(token)
             }

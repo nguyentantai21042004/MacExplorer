@@ -19,6 +19,16 @@ public enum FinderColor: Int, CaseIterable, Sendable, Codable {
     public static let menuOrder: [Self] = [.red, .orange, .yellow, .green, .blue, .purple, .gray, .none]
 }
 
+public struct FinderTag: Equatable, Hashable, Sendable {
+    public let name: String
+    public let color: FinderColor
+
+    public init(name: String, color: FinderColor = .none) {
+        self.name = name
+        self.color = color
+    }
+}
+
 public struct FinderColorSummary: Sendable, Equatable {
     public var colors: [FinderColor] = []
     public var names: [String] = []
@@ -77,6 +87,47 @@ public enum FinderColors {
         }
         return FinderColorSummary(colors: colors, names: entries.map { split($0).name })
     }
+
+    public static func readTagsList(at url: URL) throws -> [FinderTag] {
+        let state = try read(url)
+        let entries = try state.entries
+        var result: [FinderTag] = []
+        var seen = Set<String>()
+        for entry in entries {
+            let parsed = split(entry)
+            let trimmed = parsed.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, seen.insert(trimmed.lowercased()).inserted else { continue }
+            result.append(FinderTag(name: trimmed, color: parsed.color))
+        }
+        if result.isEmpty, let legacy = FinderColor(rawValue: state.label), legacy != .none {
+            result.append(FinderTag(name: legacy.name, color: legacy))
+        }
+        return result
+    }
+
+    public static func writeTagsList(_ tags: [FinderTag], at url: URL) throws {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard attributes[.type] as? FileAttributeType != .typeSymbolicLink else {
+            throw FileOperationError(L10n.text("Color labels on symbolic links are not supported. The linked item was left untouched."))
+        }
+        var cleaned: [FinderTag] = []
+        var seen = Set<String>()
+        for tag in tags {
+            let name = tag.name.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(name.lowercased()).inserted else { continue }
+            cleaned.append(FinderTag(name: name, color: tag.color))
+        }
+        let entries = cleaned.map { tag -> String in
+            tag.color == .none ? tag.name : "\(tag.name)\n\(tag.color.rawValue)"
+        }
+        let encoded = entries.isEmpty ? nil : try PropertyListSerialization.data(fromPropertyList: entries, format: .binary, options: 0)
+        let legacyColor = cleaned.first(where: { $0.color != .none })?.color.rawValue ?? 0
+        let current = try read(url)
+        let desired = State(tags: encoded, label: legacyColor)
+        if current == desired { return }
+        try replace(url, expected: current, with: desired)
+    }
+
     static func changing(_ old: State, to color: FinderColor) throws -> State {
         // Only replace standard color-name tags. Custom named tags, including
         // their colors, survive changing or removing a standard color label.

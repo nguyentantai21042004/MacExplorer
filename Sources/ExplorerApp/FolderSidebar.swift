@@ -102,6 +102,10 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
         roots = [FolderNode(title: L10n.text("Favorites"), url: nil, section: true, children: pins),
                  FolderNode(title: L10n.text("This Mac"), url: BrowserLocation.thisMac, symbol: "desktopcomputer", children: devices)]
         if !networks.isEmpty { roots.append(FolderNode(title: L10n.text("Network locations"), url: nil, section: true, children: networks)) }
+        if !DemoData.active {
+            let trashURL = TrashOperations.userTrashDirectory()
+            roots.append(FolderNode(title: L10n.text("Trash"), url: trashURL, symbol: "trash", children: []))
+        }
         syncing = true; outline.reloadData(); roots.forEach { outline.expandItem($0) }; syncing = false
         let colorGeneration = generation
         let colorNodes = roots.flatMap { $0.children ?? [] }.filter { $0.url?.isFileURL == true }
@@ -115,7 +119,8 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
 
     func sync(to url: URL) {
         selectedURL = url; syncTask?.cancel()
-        if BrowserLocation.isThisMac(url), let node = roots.first(where: { $0.url == url }) {
+        if (BrowserLocation.isThisMac(url) || TrashOperations.isTrashDirectory(url)),
+           let node = roots.first(where: { $0.url == url }) {
             let row = outline.row(forItem: node)
             if row >= 0 { syncing = true; outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false); outline.scrollRowToVisible(row); syncing = false }
             return
@@ -343,6 +348,13 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
         add(L10n.text("Open in New Tab"), #selector(openNodeInTab(_:)), value: url)
         add(L10n.text("Open in Other Pane"), #selector(openNodeInOtherPane(_:)), value: url)
         guard url.isFileURL else { return }
+        if TrashOperations.isTrashDirectory(url) {
+            menu.addItem(.separator())
+            menu.addItem(ContextMenu.item("Empty Trash…", symbol: "trash.slash") { [weak self] in
+                BrowserViewController.confirmAndEmptyTrash(window: self?.view.window)
+            })
+            return
+        }
         menu.addItem(ContextMenu.item(L10n.text("Open in New Window"), symbol: "macwindow.badge.plus") { (NSApp.delegate as? AppDelegate)?.newWindow(urls: [url]) })
         if let window = view.window { menu.addItem(FileColorMenu.shared.item(urls: [url], summaries: [node.finderColors], window: window)) }
         menu.addItem(.separator())
@@ -356,6 +368,12 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
             FileOperationController.shared.run(.compress([url], to: url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + ".zip")), window: window)
         })
         menu.addItem(FileProperties.item(urls: [url], window: view.window))
+        if let location = StorageStore.shared.locations.first(where: { $0.url == url }), location.isEjectable {
+            menu.addItem(.separator())
+            menu.addItem(ContextMenu.item("Eject “\(location.title)”", symbol: "eject") { [weak self] in
+                VolumeActions.eject(location, window: self?.view.window)
+            })
+        }
         if let id = node.favoriteID, let index = FavoriteStore.shared.favorites.items.firstIndex(where: { $0.id == id }) {
             menu.addItem(.separator())
             add(L10n.text("Move Favorite Up"), #selector(favoriteUp(_:)), value: id, enabled: index > 0)

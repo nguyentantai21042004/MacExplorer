@@ -174,6 +174,57 @@ final class ArchiveTests: XCTestCase {
         try assertClean(root)
     }
 
+    func testZipBombPreflightRejectsHighRatioTooManyEntriesAndLowSpace() async throws {
+        let (root, engine) = try fixture()
+        // Create a real deflated 2 MiB zero-filled file via ZIPArchives.compress (compresses to ~2 KB, ~1000x ratio).
+        let bigZero = root.appendingPathComponent("zeros.bin")
+        try Data(count: 2 * 1024 * 1024).write(to: bigZero)
+        let bombZip = root.appendingPathComponent("bomb.zip")
+        let compress = await engine.perform(.compress([bigZero], to: bombZip))
+        XCTAssertNil(compress.error)
+
+        let summary = try XCTUnwrap(try ZIPArchives.inspect(bombZip))
+        XCTAssertEqual(summary.entryCount, 1)
+        XCTAssertEqual(summary.uncompressedBytes, 2 * 1024 * 1024)
+        XCTAssertLessThan(summary.compressedBytes, 20_000)
+
+        // 1. Ratio bomb rejected
+        let tightRatio = ZIPArchives.PreflightLimits(
+            maxEntries: 1000,
+            maxUncompressedBytes: 100 * 1024 * 1024,
+            maxExpansionRatio: 100.0,
+            minBytesForRatioCheck: 1 * 1024 * 1024
+        )
+        XCTAssertThrowsError(try ZIPArchives.validateBeforeExtract(bombZip, destinationParent: root, limits: tightRatio))
+
+        // 2. Max uncompressed size exceeded
+        let tightSize = ZIPArchives.PreflightLimits(
+            maxEntries: 1000,
+            maxUncompressedBytes: 1 * 1024 * 1024,
+            maxExpansionRatio: 10_000.0,
+            minBytesForRatioCheck: 100 * 1024 * 1024
+        )
+        XCTAssertThrowsError(try ZIPArchives.validateBeforeExtract(bombZip, destinationParent: root, limits: tightSize))
+
+        // 3. Entry count exceeded
+        let manyZip = try zip((0..<5).map { ("f\($0).txt", "hi", false) }, in: root)
+        let manySummary = try XCTUnwrap(try ZIPArchives.inspect(manyZip))
+        XCTAssertEqual(manySummary.entryCount, 5)
+        let tightEntries = ZIPArchives.PreflightLimits(
+            maxEntries: 3,
+            maxUncompressedBytes: 100 * 1024 * 1024,
+            maxExpansionRatio: 100.0,
+            minBytesForRatioCheck: 100 * 1024 * 1024
+        )
+        XCTAssertThrowsError(try ZIPArchives.validateBeforeExtract(manyZip, destinationParent: root, limits: tightEntries))
+
+        // 4. Insufficient free space rejected
+        XCTAssertThrowsError(try ZIPArchives.validateBeforeExtract(bombZip, destinationParent: root, limits: .standard, availableSpace: 1024))
+
+        // 5. Normal small archive passes standard preflight
+        XCTAssertNoThrow(try ZIPArchives.validateBeforeExtract(manyZip, destinationParent: root, limits: .standard, availableSpace: 10 * 1024 * 1024))
+    }
+
     /// Minimal independent stored-ZIP fixture writer: permits malicious entry
     /// names and Unix symlink metadata that normal archive creation sanitizes.
     private func zip(_ entries: [(String, String, Bool)], in root: URL) throws -> URL {

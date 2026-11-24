@@ -23,7 +23,12 @@ final class BrowserTab {
     var searchStopped = false
     var isThisMac: Bool { BrowserLocation.isThisMac(history.current) }
     var hasSearchQuery: Bool { !isThisMac && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var isRecursiveSearch: Bool { hasSearchQuery && (searchScope == .subfolders || SearchQueryParser.parse(query).contentQuery != nil) }
+    var isRecursiveSearch: Bool {
+        guard hasSearchQuery else { return false }
+        if searchScope == .subfolders { return true }
+        let parsed = SearchQueryParser.parse(query)
+        return parsed.contentQuery != nil || parsed.spotlightQuery != nil
+    }
     var searchViewMode = FileViewMode.content
     var selectionKey: String { history.current.path + (hasSearchQuery ? "\nsearch:" + searchScope.rawValue + ":" + query : "") }
     var sort = FileSort()
@@ -78,7 +83,10 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     var dualButton: ActionButton!
     var copyOtherButton: ActionButton!
     var moveOtherButton: ActionButton!
-    var folderDestination: URL? { !tab.isThisMac && !tab.isRecursiveSearch && !tab.loading && tab.error == nil ? tab.history.current : nil }
+    var folderDestination: URL? {
+        guard !tab.isThisMac && !tab.isRecursiveSearch && !tab.loading && tab.error == nil else { return nil }
+        return viewMode.usesColumns ? (columnView.activeDirectoryURL ?? tab.history.current) : tab.history.current
+    }
     let thisMacView = ThisMacView()
     let table = FileTableView()
     let tableScroll = NSScrollView()
@@ -88,6 +96,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     var compactContentRows = false
     let collection = FileCollectionView()
     let collectionScroll = NSScrollView()
+    let columnView = MillerColumnsView()
     let iconLayout = NSCollectionViewFlowLayout()
     let viewPicker = FlatMenuButton(frame: .zero, pullsDown: true)
     let sortPicker = FlatMenuButton(frame: .zero, pullsDown: true)
@@ -96,8 +105,15 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     var previewURLs: [NSURL] = []
     var tabChips: [UUID: BrowserTabView] = [:]
     var viewMode: FileViewMode { tab.hasSearchQuery ? tab.searchViewMode : tab.viewMode }
-    var activeFileView: NSView { tab.isThisMac ? thisMacView.collection : viewMode.usesTable ? table : collection }
-    var activeScroll: NSScrollView { viewMode.usesTable ? tableScroll : collectionScroll }
+    var activeFileView: NSView {
+        if tab.isThisMac { return thisMacView.collection }
+        if viewMode.usesColumns { return columnView.activeTableView ?? columnView }
+        return viewMode.usesTable ? table : collection
+    }
+    var activeScroll: NSScrollView {
+        if viewMode.usesColumns { return columnView.scrollView }
+        return viewMode.usesTable ? tableScroll : collectionScroll
+    }
     var scrollKey: String { tab.selectionKey + "|" + viewMode.rawValue + "|" + tab.grouping.key.rawValue }
     let status = NSTextField(labelWithString: "")
     let gitBadge = NSTextField(labelWithString: "")
@@ -128,6 +144,13 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     private weak var commandBarSurface: Surface?
     private weak var footerSurface: Surface?
     private weak var fileAreaSurface: Surface?
+    private let trashBanner = Surface()
+    private var trashBannerHeight: NSLayoutConstraint?
+    private let trashBannerLabel = NSTextField(labelWithString: "")
+    private var trashPutBackButton: NSButton!
+    private var trashDeleteButton: NSButton!
+    private var trashEmptyButton: NSButton!
+    var isViewingTrash: Bool { !tab.isThisMac && TrashOperations.isInsideTrash(tab.history.current) }
     var suppressSelection = false
     let iconCache = NSCache<NSString, NSImage>()
     let dateFormatter: DateFormatter = {
@@ -168,7 +191,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
             navigation.leadingAnchor.constraint(equalTo: headerView.leadingAnchor), navigation.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
             navigation.topAnchor.constraint(equalTo: headerView.topAnchor), navigation.bottomAnchor.constraint(equalTo: headerView.bottomAnchor)
         ])
-        buildFileTable(); buildIconGrid()
+        buildFileTable(); buildIconGrid(); buildColumnView()
         let fileArea = buildFileArea()
         for child in [fileArea, footer] { view.addSubview(child); child.translatesAutoresizingMaskIntoConstraints = false }
         NSLayoutConstraint.activate([
@@ -380,11 +403,45 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     func buildFileArea() -> NSView {
         let area = FolderDropSurface(); area.color = Palette.surface; fileAreaSurface = area
         area.dropDestination = { [weak self] in self?.folderDestination }
-        for scroll in [tableScroll, collectionScroll, thisMacView] {
+
+        trashBanner.color = Palette.navigation
+        trashBanner.border = true
+        trashBanner.isHidden = true
+        trashBanner.translatesAutoresizingMaskIntoConstraints = false
+        let trashIcon = NSImageView(image: Palette.symbol("trash", size: 14) ?? NSImage())
+        trashIcon.contentTintColor = .secondaryLabelColor
+        trashBannerLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        trashBannerLabel.textColor = .secondaryLabelColor
+        trashBannerLabel.stringValue = L10n.text("Trash")
+        trashPutBackButton = NSButton(title: "Put Back", target: self, action: #selector(putBackSelected))
+        trashPutBackButton.bezelStyle = .rounded; trashPutBackButton.controlSize = .small
+        trashDeleteButton = NSButton(title: "Delete Immediately…", target: self, action: #selector(deleteSelectedImmediately))
+        trashDeleteButton.bezelStyle = .rounded; trashDeleteButton.controlSize = .small
+        trashEmptyButton = NSButton(title: "Empty Trash…", target: self, action: #selector(emptyTrashAction))
+        trashEmptyButton.bezelStyle = .rounded; trashEmptyButton.controlSize = .small
+        let spacer = NSView()
+        let bannerRow = NSStackView(views: [trashIcon, trashBannerLabel, spacer, trashPutBackButton, trashDeleteButton, trashEmptyButton])
+        bannerRow.orientation = .horizontal; bannerRow.spacing = 8; bannerRow.alignment = .centerY
+        bannerRow.translatesAutoresizingMaskIntoConstraints = false
+        trashBanner.addSubview(bannerRow)
+        area.addSubview(trashBanner)
+        let bannerHeight = trashBanner.heightAnchor.constraint(equalToConstant: 0)
+        trashBannerHeight = bannerHeight
+        NSLayoutConstraint.activate([
+            trashBanner.leadingAnchor.constraint(equalTo: area.leadingAnchor),
+            trashBanner.trailingAnchor.constraint(equalTo: area.trailingAnchor),
+            trashBanner.topAnchor.constraint(equalTo: area.topAnchor),
+            bannerHeight,
+            bannerRow.leadingAnchor.constraint(equalTo: trashBanner.leadingAnchor, constant: 12),
+            bannerRow.trailingAnchor.constraint(equalTo: trashBanner.trailingAnchor, constant: -12),
+            bannerRow.centerYAnchor.constraint(equalTo: trashBanner.centerYAnchor)
+        ])
+
+        for scroll in [tableScroll, collectionScroll, columnView, thisMacView] {
             scroll.translatesAutoresizingMaskIntoConstraints = false; area.addSubview(scroll)
             NSLayoutConstraint.activate([
                 scroll.leadingAnchor.constraint(equalTo: area.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: area.trailingAnchor),
-                scroll.topAnchor.constraint(equalTo: area.topAnchor), scroll.bottomAnchor.constraint(equalTo: area.bottomAnchor)
+                scroll.topAnchor.constraint(equalTo: trashBanner.bottomAnchor), scroll.bottomAnchor.constraint(equalTo: area.bottomAnchor)
             ])
         }
         let image = NSImageView(image: Palette.symbol("folder", size: 34) ?? NSImage()); image.contentTintColor = .tertiaryLabelColor
@@ -401,6 +458,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
 
     func title(for url: URL) -> String {
         if BrowserLocation.isThisMac(url) { return L10n.text("This Mac") }
+        if TrashOperations.isTrashDirectory(url) { return L10n.text("Trash") }
         if url.path == FileManager.default.homeDirectoryForCurrentUser.path { return L10n.text("Home") }
         if url.path == "/" { return "Macintosh HD" }
         return url.lastPathComponent
@@ -459,7 +517,10 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     var selectedIndexes: IndexSet {
         tab.isThisMac ? [] : viewMode.usesTable ? IndexSet(table.selectedRowIndexes.compactMap { tab.displayIndex.item(atRow: $0) }) : IndexSet(collection.selectionIndexPaths.compactMap { tab.displayIndex.item(section: $0.section, offset: $0.item) })
     }
-    var selectedItems: [FileItem] { selectedIndexes.compactMap { tab.visible.indices.contains($0) ? tab.visible[$0] : nil } }
+    var selectedItems: [FileItem] {
+        if viewMode.usesColumns { return columnView.selectedItems }
+        return selectedIndexes.compactMap { tab.visible.indices.contains($0) ? tab.visible[$0] : nil }
+    }
 
     func newTab(url: URL? = nil) {
         workspace?.activate(self)
@@ -550,14 +611,48 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         }
     }
     func openExternal(_ url: URL) {
+        openExternal([url])
+    }
+
+    @discardableResult
+    func openExternal(_ urls: [URL]) -> Task<Void, Never> {
         Task { [weak self] in
-            let isDirectory = await Task.detached { (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }.value
-            guard let self else { return }
-            if isDirectory {
-                self.newTab(url: url)
+            let targets = await Task.detached(priority: .userInitiated) {
+                ExternalOpenPlan.group(urls)
+            }.value
+            guard let self, !targets.isEmpty else { return }
+            self.applyExternalTargets(targets)
+        }
+    }
+
+    func applyExternalTargets(_ targets: [ExternalOpenTarget]) {
+        for target in targets {
+            let targetKey = ExternalOpenPlan.folderKey(target.folder)
+            let existingIndex = tabs.firstIndex { candidate in
+                !candidate.isThisMac && candidate.query.isEmpty && ExternalOpenPlan.folderKey(candidate.history.current) == targetKey
+            }
+            let reusedActiveTab: Bool
+            if let existingIndex {
+                reusedActiveTab = (existingIndex == activeIndex)
+                if !reusedActiveTab {
+                    activateTab(id: tabs[existingIndex].id)
+                } else {
+                    workspace?.activate(self)
+                }
             } else {
-                self.newTab(url: url.deletingLastPathComponent())
-                self.tab.pendingSelections[self.tab.selectionKey] = [FileOperationController.itemPath(url)]
+                reusedActiveTab = false
+                newTab(url: target.folder)
+            }
+            guard !target.selectedItems.isEmpty else { continue }
+            let pending = Set(target.selectedItems.map(FileOperationController.itemPath))
+            tab.pendingSelections[tab.selectionKey] = pending
+            if reusedActiveTab && !tab.loading {
+                let visiblePaths = Set(tab.visible.map { FileOperationController.itemPath($0.url) })
+                if pending.isSubset(of: visiblePaths) {
+                    reloadFilePresentation(selected: tab.selections[tab.selectionKey] ?? [], pending: pending)
+                } else {
+                    loadFolder(clear: false)
+                }
             }
         }
     }
@@ -630,6 +725,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     func updateStatus() {
         updateSearchMenuState()
         updateTransferButtons()
+        updateTrashBanner()
         if let workspace, workspace.activeBrowser !== self { workspace.activeBrowser.updateTransferButtons() }
         previewButton?.isEnabled = canQuickLook
         for (action, button) in operationButtons { button.isEnabled = canPerformFileAction(action) }
@@ -718,6 +814,8 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         case "kind":
             if item.isNavigable, let branch = folderBranches[item.id] {
                 cell.textField?.stringValue = "\(item.kind) · \(branch)"
+            } else if let cloudLabel = item.cloudStatus.displayLabel {
+                cell.textField?.stringValue = "\(item.kind) · \(cloudLabel)"
             } else {
                 cell.textField?.stringValue = item.kind
             }
@@ -788,6 +886,12 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
             menu.addItem(ContextMenu.item(title, symbol: symbol, action: action))
         }
         if let item = items.first {
+            if isViewingTrash {
+                let canPutBack = items.contains { TrashJournal.shared.originalURL(for: $0.url) != nil }
+                menu.addItem(ContextMenu.item("Put Back", symbol: "arrow.uturn.left", enabled: canPutBack) { [weak self] in self?.putBackSelected() })
+                menu.addItem(ContextMenu.item("Delete Immediately…", symbol: "trash.slash") { [weak self] in self?.deleteSelectedImmediately() })
+                menu.addItem(.separator())
+            }
             add(L10n.text("Open"), item.isNavigable ? "folder" : "doc") { [weak self] in self?.contextOpen() }
             if items.count > 1 {
                 add(L10n.text("Batch Rename…"), "character.cursor.ibeam") { [weak self] in self?.performFileAction(.rename) }
@@ -805,6 +909,15 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
             if items.count == 1, item.isPackage { add(L10n.text("Show Package Contents"), "shippingbox") { [weak self] in self?.contextPackage() } }
             if tab.isRecursiveSearch { add(L10n.text("Open Containing Folder"), "folder") { [weak self] in self?.openContainingFolder() } }
             add(L10n.text("Quick Look"), "eye") { [weak self] in self?.contextPreview() }
+            if let shareItem = ShareMenu.item(for: items.map(\.url)) { menu.addItem(shareItem) }
+            let downloadable = items.filter { $0.cloudStatus.canDownload }.map(\.url)
+            let evictable = items.filter { $0.cloudStatus.canEvict }.map(\.url)
+            if !downloadable.isEmpty {
+                add("Download Now", "icloud.and.arrow.down") { [weak self] in self?.runCloudAction(download: true, urls: downloadable) }
+            }
+            if !evictable.isEmpty {
+                add("Remove Download", "icloud.slash") { [weak self] in self?.runCloudAction(download: false, urls: evictable) }
+            }
             if let window = view.window { menu.addItem(FileColorMenu.shared.item(urls: items.map(\.url), summaries: items.map(\.finderColors), window: window)) }
             add(L10n.text("Copy as Path"), "link") { [weak self] in self?.contextCopy() }
             menu.addItem(.separator())
@@ -849,7 +962,11 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
             case "x": action = .cut
             case "v": action = .paste
             case "z": action = .undo
-            case "a": if viewMode.usesTable { table.selectAll(nil) } else { collection.selectAll(nil) }; return true
+            case "a":
+                if viewMode.usesColumns { columnView.selectAllInActiveColumn() }
+                else if viewMode.usesTable { table.selectAll(nil) }
+                else { collection.selectAll(nil) }
+                return true
             default: break
             }
         }
@@ -857,7 +974,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
             setViewMode(mode); return true
         }
         if flags == [.command], let character {
-            let modes: [String: FileViewMode] = ["1": .details, "2": .medium, "3": .large, "4": .extraLarge, "5": .content]
+            let modes: [String: FileViewMode] = ["1": .details, "2": .medium, "3": .large, "4": .extraLarge, "5": .content, "6": .columns]
             if let mode = modes[character] { setViewMode(mode); return true }
         }
         if flags == [.control, .shift], character == "c" { transferToOtherPane(move: false); return true }
@@ -961,7 +1078,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
     @objc private func operationsChanged() {
         guard isViewLoaded else { return }
         if viewMode.usesTable, table.numberOfRows > 0 { table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<table.numberOfRows), columnIndexes: IndexSet(integer: 0)) }
-        if !viewMode.usesTable { configureVisibleIcons() }
+        if !viewMode.usesTable && !viewMode.usesColumns { configureVisibleIcons() }
         updateStatus()
     }
     @objc private func operationsFinished(_ notification: Notification) {
@@ -995,6 +1112,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         commandBarSurface?.color = Palette.surface
         footerSurface?.color = Palette.surface
         fileAreaSurface?.color = Palette.surface
+        trashBanner.color = Palette.navigation
         headerView.color = Palette.navigation
         paneHeader?.color = Palette.chrome
         table.backgroundColor = Palette.surface
@@ -1004,6 +1122,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
         table.headerView?.needsDisplay = true
         detailsHeaderView?.needsDisplay = true
         collection.backgroundColors = [Palette.surface]
+        columnView.refreshTheme()
         thisMacView.refreshTheme()
         gitBadge.textColor = Palette.accent
         closeSearchButton?.contentTintColor = Palette.accent
@@ -1053,7 +1172,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
                 guard !Task.isCancelled, let self, let tab, self.tab === tab, tab.generation == generation else { return }
                 if let status {
                     self.gitBadge.stringValue = "git: \(status.badgeText)"
-                    self.gitBadge.textColor = status.isClean ? Palette.accent : .systemOrange
+                    self.gitBadge.textColor = !status.isKnown ? .secondaryLabelColor : status.isClean ? Palette.accent : .systemOrange
                     self.gitBadge.isHidden = false
                 } else {
                     self.gitBadge.isHidden = true
@@ -1158,6 +1277,7 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
             ))
         }
 
+        items.append(QuickJumpItem(title: L10n.text("Trash"), subtitle: TrashOperations.userTrashDirectory().path, symbol: "trash", execute: { newTab in .navigate(TrashOperations.userTrashDirectory(), newTab: newTab) }))
         items.append(QuickJumpItem(title: L10n.text("Toggle Dual Pane"), subtitle: "⇧⌘D", symbol: "rectangle.split.2x1", execute: { _ in .toggleDualPane }))
         items.append(QuickJumpItem(title: L10n.text("Toggle Preview Panel"), subtitle: "⌥⌘P", symbol: "sidebar.right", execute: { _ in .togglePreviewPane }))
         items.append(QuickJumpItem(title: L10n.text("Toggle Folder Sizes"), subtitle: "Real-time calculation", symbol: "internaldrive", execute: { _ in .toggleFolderSizes }))
@@ -1192,6 +1312,150 @@ final class BrowserViewController: NSViewController, NSTableViewDataSource, NSTa
                 }
             case let .setTheme(theme):
                 AppPreferences.shared.theme = theme
+            }
+        }
+    }
+
+    // MARK: Trash Manager
+
+    func updateTrashBanner() {
+        let show = isViewingTrash
+        trashBanner.isHidden = !show
+        trashBannerHeight?.constant = show ? 38 : 0
+        guard show else { return }
+        let items = selectedItems
+        let restorableCount = items.filter { TrashJournal.shared.originalURL(for: $0.url) != nil }.count
+        trashPutBackButton?.isEnabled = restorableCount > 0 && !operations.busy
+        trashDeleteButton?.isEnabled = !items.isEmpty && !operations.busy
+        trashEmptyButton?.isEnabled = !tab.items.isEmpty && !operations.busy
+        trashBannerLabel.stringValue = items.isEmpty
+            ? L10n.text("Trash")
+            : "\(L10n.text("Trash")) · \(items.count) selected"
+    }
+
+    @objc func putBackSelected() {
+        guard isViewingTrash else { return }
+        let targets = selectedItems.map(\.url).filter { TrashJournal.shared.originalURL(for: $0) != nil }
+        guard !targets.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            var errors: [String] = []
+            for url in targets {
+                do {
+                    _ = try await Task.detached(priority: .userInitiated) {
+                        try TrashOperations.putBack(url)
+                    }.value
+                } catch {
+                    errors.append(error.localizedDescription)
+                }
+            }
+            guard let self else { return }
+            self.refresh(clearThumbnails: false)
+            if !errors.isEmpty {
+                let alert = NSAlert()
+                alert.messageText = "Couldn’t Put Back All Items"
+                alert.informativeText = errors.joined(separator: "\n")
+                alert.addButton(withTitle: L10n.text("OK"))
+                if let win = self.view.window, win.attachedSheet == nil { _ = await alert.beginSheetModal(for: win) }
+                else { alert.runModal() }
+            }
+        }
+    }
+
+    @objc func deleteSelectedImmediately() {
+        guard isViewingTrash else { return }
+        let targets = selectedItems.map(\.url)
+        guard !targets.isEmpty else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = targets.count == 1
+            ? "Delete “\(targets[0].lastPathComponent)” permanently?"
+            : "Delete \(targets.count) items permanently?"
+        alert.informativeText = "This action cannot be undone."
+        alert.addButton(withTitle: "Delete Permanently")
+        alert.addButton(withTitle: L10n.text("Cancel"))
+        let confirm: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            Task { @MainActor [weak self] in
+                do {
+                    _ = try await Task.detached(priority: .userInitiated) {
+                        try TrashOperations.deletePermanently(targets)
+                    }.value
+                    self?.refresh(clearThumbnails: false)
+                } catch {
+                    self?.presentTrashError(error)
+                }
+            }
+        }
+        if let win = view.window, win.attachedSheet == nil {
+            alert.beginSheetModal(for: win, completionHandler: confirm)
+        } else {
+            confirm(alert.runModal())
+        }
+    }
+
+    @objc func emptyTrashAction() {
+        Self.confirmAndEmptyTrash(window: view.window) { [weak self] in
+            self?.refresh(clearThumbnails: false)
+        }
+    }
+
+    static func confirmAndEmptyTrash(window: NSWindow?, onComplete: (() -> Void)? = nil) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Are you sure you want to permanently erase the items in the Trash?"
+        alert.informativeText = "You can’t undo this action."
+        alert.addButton(withTitle: "Empty Trash")
+        alert.addButton(withTitle: L10n.text("Cancel"))
+        let confirm: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .alertFirstButtonReturn else { return }
+            Task { @MainActor in
+                do {
+                    _ = try await Task.detached(priority: .userInitiated) {
+                        try TrashOperations.emptyTrash()
+                    }.value
+                    onComplete?()
+                } catch {
+                    let errAlert = NSAlert()
+                    errAlert.messageText = "Couldn’t Empty Trash"
+                    errAlert.informativeText = error.localizedDescription
+                    errAlert.addButton(withTitle: L10n.text("OK"))
+                    if let window, window.attachedSheet == nil { _ = await errAlert.beginSheetModal(for: window) }
+                    else { errAlert.runModal() }
+                }
+            }
+        }
+        if let window, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window, completionHandler: confirm)
+        } else {
+            confirm(alert.runModal())
+        }
+    }
+
+    private func presentTrashError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Trash Operation Failed"
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: L10n.text("OK"))
+        if let win = view.window, win.attachedSheet == nil { alert.beginSheetModal(for: win) }
+        else { alert.runModal() }
+    }
+
+    private func runCloudAction(download: Bool, urls: [URL]) {
+        Task { @MainActor [weak self] in
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    if download { try CloudStorageHelper.startDownloading(urls) }
+                    else { try CloudStorageHelper.removeDownload(urls) }
+                }.value
+                self?.refresh(clearThumbnails: false)
+            } catch {
+                guard let self else { return }
+                let alert = NSAlert()
+                alert.messageText = download ? "Couldn’t Download Cloud Item" : "Couldn’t Remove Local Download"
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: L10n.text("OK"))
+                if let win = self.view.window, win.attachedSheet == nil { _ = await alert.beginSheetModal(for: win) }
+                else { alert.runModal() }
             }
         }
     }

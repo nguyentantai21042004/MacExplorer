@@ -25,15 +25,34 @@ package struct InterfaceLanguage: Equatable, Sendable {
 }
 
 package struct LocalizationCatalog: Sendable {
+    package static let maxResourceBytes = 2 * 1024 * 1024
+
     // Discover the files once so Settings and windows agree until the next launch.
-    package static let current: Self = {
-        let app = Bundle.main.bundleURL
-        let adjacent = app.pathExtension == "app" ? ["Localizations", "Explorer-Localizations"].map {
-            app.deletingLastPathComponent().appendingPathComponent($0, isDirectory: true)
-        } : []
+    package static let current: Self = Self(externalDirectories: defaultExternalDirectories(bundleURL: Bundle.main.bundleURL))
+
+    /// Only trust sibling `Localizations` folders when the app lives in a standard
+    /// Applications directory; launching from `~/Downloads` or `/tmp` must never
+    /// auto-load untrusted `.lproj` files placed alongside the bundle.
+    package static func defaultExternalDirectories(bundleURL: URL,
+                                                   userDirectory: URL = Self.userDirectory,
+                                                   homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> [URL] {
+        var directories: [URL] = []
+        if bundleURL.pathExtension == "app" {
+            let parent = bundleURL.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL.path
+            let trustedRoots = [
+                URL(fileURLWithPath: "/Applications").resolvingSymlinksInPath().standardizedFileURL.path,
+                homeDirectory.appendingPathComponent("Applications").resolvingSymlinksInPath().standardizedFileURL.path,
+            ]
+            if trustedRoots.contains(parent) {
+                for folder in ["Localizations", "Explorer-Localizations"] {
+                    directories.append(bundleURL.deletingLastPathComponent().appendingPathComponent(folder, isDirectory: true))
+                }
+            }
+        }
         // User-installed packs take precedence over copies beside Explorer.app.
-        return Self(externalDirectories: adjacent + [userDirectory])
-    }()
+        directories.append(userDirectory)
+        return directories
+    }
 
     private static let userDirectory = URL.applicationSupportDirectory
         .appendingPathComponent("Explorer/Localizations", isDirectory: true)
@@ -46,15 +65,22 @@ package struct LocalizationCatalog: Sendable {
 
         var external: [String: ExternalLocalization] = [:]
         for directory in externalDirectories {
-            guard let folders = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil,
+            guard Self.isRegularDirectory(directory),
+                  let folders = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
                                                                               options: [.skipsHiddenFiles]) else { continue }
             for folder in folders.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where folder.pathExtension == "lproj" {
-                guard let identifier = Self.identifier(for: folder),
+                guard Self.isRegularDirectory(folder),
+                      let identifier = Self.identifier(for: folder),
                       let translation = ExternalLocalization(folder: folder) else { continue }
                 external[identifier] = translation
             }
         }
         self.external = external
+    }
+
+    private static func isRegularDirectory(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]) else { return false }
+        return values.isDirectory == true && values.isSymbolicLink == false
     }
 
     private static func identifier(for folder: URL) -> String? {
@@ -75,11 +101,18 @@ package struct LocalizationCatalog: Sendable {
 
     package static func install(from source: URL, into destination: URL, replacing confirmed: Set<String> = []) throws -> Bool {
         let files = FileManager.default
-        let candidates = source.pathExtension == "lproj" ? [source] :
-            try files.contentsOfDirectory(at: source, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+        let candidates: [URL]
+        if source.pathExtension == "lproj" {
+            candidates = [source]
+        } else {
+            guard isRegularDirectory(source) else { return false }
+            candidates = try files.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles])
+        }
         var packs: [String: URL] = [:]
         for folder in candidates.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            guard let identifier = identifier(for: folder), ExternalLocalization(folder: folder) != nil else { continue }
+            guard isRegularDirectory(folder),
+                  let identifier = identifier(for: folder),
+                  ExternalLocalization(folder: folder) != nil else { continue }
             packs[identifier] = folder
         }
         guard !packs.isEmpty else { return false }
@@ -100,10 +133,10 @@ package struct LocalizationCatalog: Sendable {
             try files.createDirectory(at: copy, withIntermediateDirectories: false)
             for filename in ["Localizable.strings", "Localizable.stringsdict", "LocalizationCredit.strings"] {
                 let resource = source.appendingPathComponent(filename)
-                if files.fileExists(atPath: resource.path) {
-                    let data = try Data(contentsOf: resource)
-                    try data.write(to: copy.appendingPathComponent(filename))
-                }
+                guard (try? files.attributesOfItem(atPath: resource.path)) != nil else { continue }
+                let data = try SafeFileReader.readPrefix(of: resource, limit: maxResourceBytes, followSymlinks: false,
+                                                         maxFileSize: Int64(maxResourceBytes))
+                try data.write(to: copy.appendingPathComponent(filename))
             }
         }
         for (identifier, _) in orderedPacks {
@@ -188,7 +221,11 @@ private struct ExternalLocalization: Sendable {
     }
 
     private static func read(_ filename: String, in folder: URL) -> [String: Any]? {
-        guard let data = try? Data(contentsOf: folder.appendingPathComponent(filename)),
+        let resource = folder.appendingPathComponent(filename)
+        guard let data = try? SafeFileReader.readPrefix(of: resource,
+                                                        limit: LocalizationCatalog.maxResourceBytes,
+                                                        followSymlinks: false,
+                                                        maxFileSize: Int64(LocalizationCatalog.maxResourceBytes)),
               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) else { return nil }
         return plist as? [String: Any]
     }

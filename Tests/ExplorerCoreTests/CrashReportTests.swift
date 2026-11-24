@@ -72,6 +72,26 @@ struct CrashReportTests {
         #expect(versions.contains("At the crash\nExplorer version 0.10.0\nExplorer build 24\nOperating system macOS 14.7.8 (23H730)"))
     }
 
+    @Test func redactsHomeDirectoryPathsPlainAndJsonEscaped() async throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rawIPS = """
+        {"bundleID":"io.bquick.explorer","bug_type":"309","timestamp":"2026-11-19 17:00:00.2500 +0600"}
+        {"bundleInfo":{"CFBundleIdentifier":"io.bquick.explorer","CFBundleShortVersionString":"0.13.1","CFBundleVersion":"31"},"procPath":"/Users/alice/Applications/Explorer.app","escaped":"\\/Users\\/alice\\/Documents\\/secret.txt"}
+        """
+        try Data(rawIPS.utf8).write(to: root.appendingPathComponent("Explorer-home.ips"))
+        let report = try #require(try CrashReport.latest(in: root, executable: "Explorer", bundleIdentifiers: [explorerID]))
+        let archive = root.appendingPathComponent("Redacted.zip")
+        try await report.export(to: archive, running: .init(app: "0.13.1", build: "31", macOS: "macOS 26.3.1"), homePath: "/Users/alice")
+        let output = root.appendingPathComponent("ExtractedRedacted", isDirectory: true)
+        try await ZIPArchives.extract(archive, to: output, workspace: root)
+        let exported = try String(contentsOf: output.appendingPathComponent("Explorer.ips"), encoding: .utf8)
+        #expect(!exported.contains("/Users/alice"))
+        #expect(!exported.contains("\\/Users\\/alice"))
+        #expect(exported.contains("/Users/<redacted>/Applications/Explorer.app"))
+        #expect(exported.contains("\\/Users\\/<redacted>\\/Documents\\/secret.txt"))
+    }
+
     private func fixture() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("Explorer-Crash-Tests-\(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)

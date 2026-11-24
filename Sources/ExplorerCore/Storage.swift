@@ -22,6 +22,7 @@ public struct StorageLocation: Identifiable, Equatable, Sendable {
     public var readOnly: Bool
     public var children: [StorageLocation]
     public var isNetworkLocation: Bool { kind == .network || kind == .googleDrive || kind == .cloud }
+    public var isEjectable: Bool { (kind == .externalDrive || kind == .network) && url.path != "/" }
     public init(url: URL, title: String, detail: String = "", kind: Kind, capacity: StorageCapacity? = nil, readOnly: Bool = false, children: [StorageLocation] = []) {
         self.url = url; self.title = title; self.detail = detail; self.kind = kind
         self.capacity = capacity; self.readOnly = readOnly; self.children = children
@@ -94,5 +95,23 @@ public enum StorageDiscovery {
                 let result = a.title.localizedStandardCompare(b.title)
                 return result == .orderedSame ? a.detail.localizedStandardCompare(b.detail) == .orderedAscending : result == .orderedAscending
             }
+    }
+}
+
+/// Validates network file server URLs for "Connect to Server" so arbitrary schemes
+/// (e.g. `file:`, `javascript:`, `applescript:`) are never passed to LaunchServices.
+public enum ServerURLValidator {
+    public static let allowedSchemes: Set<String> = ["smb", "cifs", "nfs", "afp", "webdav", "webdavs", "https", "http"]
+
+    public static func validate(_ raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.contains(where: { $0.isWhitespace || $0.isNewline || ($0.asciiValue ?? 32) < 32 }),
+              let components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              allowedSchemes.contains(scheme),
+              let host = components.host, !host.isEmpty,
+              let url = components.url else { return nil }
+        return url
     }
 }

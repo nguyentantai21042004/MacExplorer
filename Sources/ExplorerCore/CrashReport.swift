@@ -1,6 +1,8 @@
 import Foundation
 
 package struct CrashReport: Sendable {
+    package static let maxReportBytes = 10 * 1024 * 1024
+
     package struct Versions: Sendable {
         let app: String?
         let build: String?
@@ -39,7 +41,10 @@ package struct CrashReport: Sendable {
                 guard ["ips", "crash"].contains(ext), name.hasPrefix(executable + "-") || name.hasPrefix(executable + "_"),
                       let values = try? url.resourceValues(forKeys: keys),
                       values.isRegularFile == true, values.isSymbolicLink == false,
-                      let contents = try? Data(contentsOf: url),
+                      let contents = try? SafeFileReader.readPrefix(of: url,
+                                                                    limit: Self.maxReportBytes,
+                                                                    followSymlinks: false,
+                                                                    maxFileSize: Int64(Self.maxReportBytes)),
                       let (timestamp, versions) = metadata(in: contents, extension: ext, bundleIdentifiers: bundleIdentifiers)
                 else { continue }
                 let date = parseDate(timestamp) ?? values.contentModificationDate ?? .distantPast
@@ -94,7 +99,26 @@ package struct CrashReport: Sendable {
         return formatter.date(from: timestamp)
     }
 
-    package func export(to destination: URL, running: Versions) async throws {
+    /// Replaces the user's home directory path (both plain and JSON-escaped) with a
+    /// generic placeholder so exported crash archives do not leak the local username.
+    package static func redact(_ data: Data, homePath: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Data {
+        let normalized = homePath.hasSuffix("/") && homePath.count > 1 ? String(homePath.dropLast()) : homePath
+        guard normalized.count > 1, var text = String(data: data, encoding: .utf8) else { return data }
+        let escaped = normalized.replacingOccurrences(of: "/", with: "\\/")
+        var changed = false
+        if text.contains(normalized) {
+            text = text.replacingOccurrences(of: normalized, with: "/Users/<redacted>")
+            changed = true
+        }
+        if escaped != normalized, text.contains(escaped) {
+            text = text.replacingOccurrences(of: escaped, with: "\\/Users\\/<redacted>")
+            changed = true
+        }
+        return changed ? Data(text.utf8) : data
+    }
+
+    package func export(to destination: URL, running: Versions,
+                        homePath: String = FileManager.default.homeDirectoryForCurrentUser.path) async throws {
         let files = FileManager.default
         let workspace = files.temporaryDirectory.appendingPathComponent("Explorer-Crash-\(UUID())", isDirectory: true)
         try files.createDirectory(at: workspace, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -102,7 +126,7 @@ package struct CrashReport: Sendable {
         let report = workspace.appendingPathComponent("Explorer.\(fileExtension)")
         let summary = workspace.appendingPathComponent("Versions.txt")
         let archive = workspace.appendingPathComponent("Report.zip")
-        try contents.write(to: report)
+        try Self.redact(contents, homePath: homePath).write(to: report)
         try """
         At the crash
         Explorer version \(versions.app ?? "Unknown")

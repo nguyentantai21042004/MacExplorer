@@ -12,6 +12,7 @@ public struct FileItem: Identifiable, Sendable, Equatable {
     public let created: Date?
     public let size: Int64?
     public let finderColors: FinderColorSummary
+    public let cloudStatus: CloudItemStatus
     public var isNavigable: Bool { isDirectory && !isPackage }
     public var kind: String {
         if isNavigable { return L10n.text("Folder") }
@@ -22,11 +23,12 @@ public struct FileItem: Identifiable, Sendable, Equatable {
 
     public init(url: URL, name: String, isDirectory: Bool, isPackage: Bool = false,
                 isHidden: Bool = false, isSymbolicLink: Bool = false, modified: Date? = nil, created: Date? = nil, size: Int64? = nil,
-                finderColors: FinderColorSummary = FinderColorSummary()) {
+                finderColors: FinderColorSummary = FinderColorSummary(),
+                cloudStatus: CloudItemStatus = .local) {
         self.url = url; self.name = name; self.isDirectory = isDirectory
         self.isPackage = isPackage; self.isHidden = isHidden; self.isSymbolicLink = isSymbolicLink
         self.modified = modified; self.created = created; self.size = size
-        self.finderColors = finderColors
+        self.finderColors = finderColors; self.cloudStatus = cloudStatus
     }
 }
 
@@ -72,8 +74,13 @@ public enum FileSystem {
     public static func list(_ directory: URL) throws -> [FileItem] {
         try Task.checkCancellation()
         let manager = FileManager()
-        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey, .isHiddenKey,
+        let checkCloud = CloudStorageHelper.isCloudPath(directory)
+        var keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey, .isHiddenKey,
             .isSymbolicLinkKey, .contentModificationDateKey, .creationDateKey, .fileSizeKey, .labelNumberKey]
+        if checkCloud {
+            keys.formUnion([.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey,
+                            .ubiquitousItemIsDownloadingKey, .ubiquitousItemIsUploadingKey])
+        }
         let urls = try manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: Array(keys))
         var result: [FileItem] = []
         result.reserveCapacity(urls.count)
@@ -96,7 +103,8 @@ public enum FileSystem {
                 isSymbolicLink: values?.isSymbolicLink ?? false,
                 modified: values?.contentModificationDate, created: values?.creationDate,
                 size: directory ? nil : values?.fileSize.map(Int64.init),
-                finderColors: FinderColors.summary(at: url, legacyLabel: values?.labelNumber ?? 0)))
+                finderColors: FinderColors.summary(at: url, legacyLabel: values?.labelNumber ?? 0),
+                cloudStatus: checkCloud ? CloudStorageHelper.status(from: values) : .local))
         }
         return result
     }

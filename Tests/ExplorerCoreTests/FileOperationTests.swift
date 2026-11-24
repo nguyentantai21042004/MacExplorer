@@ -307,6 +307,19 @@ final class FileOperationTests: XCTestCase {
         XCTAssertNotNil(result.error); XCTAssertEqual(try read(old), "old")
         XCTAssertEqual(try read(root.appendingPathComponent("Source/relocated.txt")), "original")
     }
+    func testProtectedSystemPathsAndVolumeRootsCannotBeChanged() async throws {
+        let home = "/Users/tester"
+        for protected in ["/", home, "/System", "/Library", "/Applications", "/Users", "/Volumes", "/Volumes/ExternalUSB", "/bin", "/usr"] {
+            XCTAssertTrue(FileOperationEngine.isProtectedSystemPath(URL(fileURLWithPath: protected), homePath: home), "Expected \(protected) to be protected")
+        }
+        for allowed in ["/Applications/MyApp.app", "/Volumes/ExternalUSB/Photos", "\(home)/Documents/file.txt", "/tmp/work/a.txt"] {
+            XCTAssertFalse(FileOperationEngine.isProtectedSystemPath(URL(fileURLWithPath: allowed), homePath: home), "Expected \(allowed) to be allowed")
+        }
+        let root = try fixture(), engine = engine(root)
+        let result = await engine.perform(.trash([URL(fileURLWithPath: "/Applications")]))
+        XCTAssertNotNil(result.error)
+        XCTAssertTrue(result.completed.isEmpty)
+    }
 }
 
 private actor Counter {

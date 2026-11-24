@@ -150,7 +150,9 @@ public enum DirectorySearch {
         let ext = item.url.pathExtension.lowercased()
         if !ext.isEmpty && binaryExtensions.contains(ext) { return false }
         if let size = item.size, size <= 0 || size > maxContentScanBytes { return false }
-        guard let data = try? Data(contentsOf: item.url, options: [.mappedIfSafe]),
+        // SafeFileReader refuses FIFOs and devices, so a pipe named `notes.txt` cannot stall the scan.
+        guard let data = try? SafeFileReader.readPrefix(of: item.url, limit: Int(maxContentScanBytes), followSymlinks: false,
+                                                        maxFileSize: maxContentScanBytes),
               !data.isEmpty,
               data.count <= Int(maxContentScanBytes),
               !data.prefix(2048).contains(0),

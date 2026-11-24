@@ -46,6 +46,8 @@ public struct FolderAppearanceStyle: Equatable, Hashable, Sendable {
 /// All regexes and root prefixes are compiled once at load time so cell rendering
 /// never pays compilation overhead and rejects non-matching paths via O(1) prefix/depth checks.
 public final class FolderAppearanceMatcher: @unchecked Sendable {
+    public static let maxRuleCount = 256
+
     private struct CompiledRule {
         let expandedRoot: String?
         let expandedRootWithSlash: String?
@@ -91,10 +93,11 @@ public final class FolderAppearanceMatcher: @unchecked Sendable {
         self.homePrefix = normalizedHome == "/" ? "/" : normalizedHome + "/"
 
         var list: [CompiledRule] = []
-        list.reserveCapacity(rules.count)
+        let boundedRules = rules.prefix(Self.maxRuleCount)
+        list.reserveCapacity(boundedRules.count)
         var usesPathRegex = false
 
-        for rule in rules {
+        for rule in boundedRules {
             let colorHex = Self.resolveHexColor(rule.color)
             let symbol = rule.symbol?.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanSymbol = (symbol?.isEmpty == false) ? symbol : nil
@@ -107,7 +110,7 @@ public final class FolderAppearanceMatcher: @unchecked Sendable {
             var compiledPath: NSRegularExpression?
             var expectsAbsolute = false
             if let pattern = rule.pathRegex, !pattern.isEmpty {
-                guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+                guard let regex = try? SafeRegex.compile(pattern) else { continue }
                 compiledPath = regex
                 expectsAbsolute = pattern.hasPrefix("/") || pattern.hasPrefix("^/")
                 usesPathRegex = true
@@ -115,7 +118,7 @@ public final class FolderAppearanceMatcher: @unchecked Sendable {
 
             var compiledName: NSRegularExpression?
             if let pattern = rule.nameRegex, !pattern.isEmpty {
-                guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+                guard let regex = try? SafeRegex.compile(pattern) else { continue }
                 compiledName = regex
             }
 
@@ -197,15 +200,13 @@ public final class FolderAppearanceMatcher: @unchecked Sendable {
 
             // 2. Optional name regex.
             if let nameRegex = rule.nameRegex {
-                let range = NSRange(name.startIndex..<name.endIndex, in: name)
-                guard nameRegex.firstMatch(in: name, options: [], range: range) != nil else { continue }
+                guard SafeRegex.matches(nameRegex, in: name) else { continue }
             }
 
             // 3. Optional path regex (against ~/... by default, or absolute path if pattern starts with /).
             if let pathRegex = rule.pathRegex {
                 let candidate = rule.pathRegexExpectsAbsolute ? path : tildePath()
-                let range = NSRange(candidate.startIndex..<candidate.endIndex, in: candidate)
-                guard pathRegex.firstMatch(in: candidate, options: [], range: range) != nil else { continue }
+                guard SafeRegex.matches(pathRegex, in: candidate) else { continue }
             }
 
             return rule.style

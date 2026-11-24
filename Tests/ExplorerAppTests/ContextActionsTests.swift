@@ -18,12 +18,19 @@ struct ContextActionsTests {
         #expect(unknown.apps.isEmpty); #expect(unknown.defaultApp == nil)
     }
 
-    @Test func propertiesPassesLiteralPathsAsData() {
-        let urls = [URL(fileURLWithPath: "/tmp/Quote\" and \\ backslash/日本語\nfile.txt"), URL(fileURLWithPath: "/tmp/$(do not execute).json")]
-        let arguments = FinderInformation.arguments(for: urls)
-        #expect(arguments.numberOfItems == 2)
-        #expect(arguments.atIndex(1)?.stringValue == urls[0].path)
-        #expect(arguments.atIndex(2)?.stringValue == urls[1].path)
+    @Test func nativeGetInfoInspectsFileWithoutFinderAppleScript() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("Explorer-GetInfoUI-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("Quote\" and \\ backslash.txt")
+        try Data("hello".utf8).write(to: file)
+
+        let controller = GetInfoWindowController(urls: [file], key: file.path)
+        defer { controller.close() }
+        #expect(controller.snapshot?.name == file.lastPathComponent)
+        #expect(controller.snapshot?.size == 5)
+        #expect(controller.snapshot?.isRegularFile == true)
     }
 
     @Test func fileMenus() async throws {

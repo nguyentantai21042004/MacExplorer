@@ -5,6 +5,12 @@ import Quartz
 @main
 struct ExplorerMain {
     @MainActor static func main() {
+        if let relaunch = RelaunchHelper.parse(arguments: CommandLine.arguments) {
+            if RelaunchHelper.waitForExit(pid: relaunch.pid) {
+                try? RelaunchHelper.launchApp(at: relaunch.bundleURL)
+            }
+            Foundation.exit(0)
+        }
         _ = L10n.current
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -50,23 +56,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         else if let index = args.firstIndex(of: "--folder"), index + 1 < args.count {
             newWindow(urls: [URL(fileURLWithPath: args[index + 1], isDirectory: true)])
         } else if !pendingURLs.isEmpty {
-            newWindow(urls: pendingURLs)
+            let urls = pendingURLs
             pendingURLs = []
+            openExternalInNewWindow(urls)
         } else {
             newWindow()
         }
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func openExternalInNewWindow(_ urls: [URL]) {
+        let targets = ExternalOpenPlan.group(urls)
+        guard !targets.isEmpty else { newWindow(); return }
+        newWindow(urls: targets.map(\.folder), active: targets.count - 1)
+        if let browser = current?.browser {
+            for (index, target) in targets.enumerated() where !target.selectedItems.isEmpty && browser.tabs.indices.contains(index) {
+                let pending = Set(target.selectedItems.map(FileOperationController.itemPath))
+                browser.tabs[index].pendingSelections[browser.tabs[index].selectionKey] = pending
+            }
+        }
+    }
+
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
         let urls = filenames.map { URL(fileURLWithPath: $0) }
         if !ready { pendingURLs += urls }
         else if let current {
-            for url in urls { current.browser.openExternal(url) }
+            current.browser.openExternal(urls)
             current.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         } else {
-            newWindow(urls: urls)
+            openExternalInNewWindow(urls)
             NSApp.activate(ignoringOtherApps: true)
         }
         sender.reply(toOpenOrPrint: .success)
@@ -100,19 +119,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return .terminateNow
     }
     private func scheduleLanguageRestart() throws {
-        let launcher = Process()
-        launcher.executableURL = URL(fileURLWithPath: "/bin/sh")
-        // Wait for normal termination to finish saving the session and releasing the global shortcut.
-        launcher.arguments = ["-c", """
-            remaining=60
-            while kill -0 "$1" 2>/dev/null; do
-                [ "$remaining" -gt 0 ] || exit 1
-                remaining=$((remaining - 1))
-                /bin/sleep 1
-            done
-            exec /usr/bin/open -n "$2"
-            """, "explorer-relaunch", String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundleURL.path]
-        try launcher.run()
+        guard let executable = Bundle.main.executableURL else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        // Wait for normal termination to finish saving the session and releasing the global shortcut, without invoking a shell.
+        try RelaunchHelper.scheduleSelfRelaunch(
+            executableURL: executable,
+            bundleURL: Bundle.main.bundleURL,
+            currentPID: ProcessInfo.processInfo.processIdentifier
+        )
     }
     func applicationWillTerminate(_ notification: Notification) {
         current?.browser.saveSession(); hotKeyRegistrar.shutdown()
@@ -224,6 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         catch { NSApp.presentError(error) }
     }
     @objc func thisMac(_ sender: Any?) { current?.browser.navigate(BrowserLocation.thisMac) }
+    @objc func openTrash(_ sender: Any?) { current?.browser.navigate(TrashOperations.userTrashDirectory()) }
+    @objc func connectToServer(_ sender: Any?) { VolumeActions.showConnectToServer(window: current?.window) }
     @objc func hidden(_ sender: Any?) { current?.browser.toggleHidden() }
     @objc func copyPath(_ sender: Any?) { current?.browser.copySelectedPaths() }
     @objc func filter(_ sender: Any?) { current?.browser.focusFilter() }
@@ -369,8 +386,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         add(go, L10n.text("Parent Folder"), #selector(up), String(UnicodeScalar(NSUpArrowFunctionKey)!), [.command])
         add(go, L10n.text("Home"), #selector(home), "h", [.command, .shift])
         add(go, L10n.text("This Mac"), #selector(thisMac), "e", [.command, .shift])
+        add(go, L10n.text("Trash"), #selector(openTrash))
         go.addItem(.separator())
         add(go, L10n.text("Quick Jump…"), #selector(quickJump), "k")
+        add(go, "Connect to Server…", #selector(connectToServer), "k", [.command, .shift])
         add(go, L10n.text("Open Containing Folder"), #selector(containingFolder), "r", [.command, .shift])
         add(go, L10n.text("Go to Path…"), #selector(editPath), "l")
         let window = submenu(L10n.text("Window"))
