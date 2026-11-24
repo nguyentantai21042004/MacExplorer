@@ -924,7 +924,7 @@ final class DirectoryWatcher {
         // Never let that prevent the window (or a macOS access prompt) from appearing.
         opening = Task { [weak self] in
             let result: (fd: Int32, modifiedAfterStart: Bool) = await Task.detached(priority: .utility) {
-                let fd = open(url.path, O_EVTONLY | O_NONBLOCK)
+                let fd = open(url.path, O_EVTONLY | O_NONBLOCK | O_CLOEXEC)
                 guard fd >= 0 else { return (-1, false) }
                 var st = stat()
                 var changedWhileOpening = false
@@ -939,7 +939,17 @@ final class DirectoryWatcher {
             let fd = result.fd
             let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd,
                 eventMask: [.write, .delete, .rename, .attrib, .revoke], queue: .main)
-            source.setEventHandler { MainActor.assumeIsolated { changed() } }
+            source.setEventHandler { [weak self, weak source] in
+                MainActor.assumeIsolated {
+                    let flags = source?.data ?? []
+                    if flags.contains(.delete) || flags.contains(.revoke) || flags.contains(.rename) {
+                        self?.source?.cancel()
+                        self?.source = nil
+                        self?.needsRetry = true
+                    }
+                    changed()
+                }
+            }
             source.setCancelHandler { close(fd) }
             self.source = source; source.resume()
             if result.modifiedAfterStart {
@@ -947,5 +957,6 @@ final class DirectoryWatcher {
             }
         }
     }
+    func waitUntilReady() async { await opening?.value }
     deinit { opening?.cancel(); source?.cancel() }
 }

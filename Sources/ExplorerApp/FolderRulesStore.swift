@@ -99,6 +99,9 @@ final class FolderRulesStore {
         if notify {
             NotificationCenter.default.post(name: Self.changed, object: self)
         }
+        if dirWatcher == nil {
+            attachWatcherIfDirectoryExists()
+        }
     }
 
     func ensureConfigFileExists() throws {
@@ -124,15 +127,20 @@ final class FolderRulesStore {
         guard dirWatcher == nil else { return }
         let dirPath = configURL.deletingLastPathComponent().path
         guard FileManager.default.fileExists(atPath: dirPath) else { return }
-        let fd = open(dirPath, O_EVTONLY | O_NONBLOCK)
+        let fd = open(dirPath, O_EVTONLY | O_NONBLOCK | O_CLOEXEC)
         guard fd >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
-            eventMask: [.write, .rename, .delete],
+            eventMask: [.write, .rename, .delete, .revoke],
             queue: .main
         )
-        source.setEventHandler { [weak self] in
+        source.setEventHandler { [weak self, weak source] in
             MainActor.assumeIsolated {
+                let flags = source?.data ?? []
+                if flags.contains(.delete) || flags.contains(.revoke) || flags.contains(.rename) {
+                    self?.dirWatcher?.cancel()
+                    self?.dirWatcher = nil
+                }
                 self?.scheduleReload()
             }
         }

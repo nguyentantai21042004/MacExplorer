@@ -54,11 +54,15 @@ final class FolderSidebar: NSViewController, NSOutlineViewDataSource, NSOutlineV
         let menu = NSMenu(); menu.delegate = self; outline.menu = menu
         scroll.documentView = outline
         scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
+        let trailing = scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4)
+        trailing.priority = NSLayoutConstraint.Priority(999)
+        let bottom = scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        bottom.priority = NSLayoutConstraint.Priority(999)
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
-            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            trailing,
             scroll.topAnchor.constraint(equalTo: view.topAnchor, constant: 4),
-            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            bottom
         ])
         rebuild()
         NotificationCenter.default.addObserver(self, selector: #selector(favoritesChanged), name: FavoriteStore.changed, object: nil)

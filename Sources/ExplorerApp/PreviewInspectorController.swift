@@ -53,13 +53,17 @@ final class PreviewInspectorController: NSViewController {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         surface.addSubview(scroll)
 
+        let dividerWidth = divider.widthAnchor.constraint(equalToConstant: 1)
+        dividerWidth.priority = NSLayoutConstraint.Priority(999)
+        let scrollTrailing = scroll.trailingAnchor.constraint(equalTo: surface.trailingAnchor)
+        scrollTrailing.priority = NSLayoutConstraint.Priority(999)
         NSLayoutConstraint.activate([
             divider.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
             divider.topAnchor.constraint(equalTo: surface.topAnchor),
             divider.bottomAnchor.constraint(equalTo: surface.bottomAnchor),
-            divider.widthAnchor.constraint(equalToConstant: 1),
+            dividerWidth,
             scroll.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
+            scrollTrailing,
             scroll.topAnchor.constraint(equalTo: surface.topAnchor),
             scroll.bottomAnchor.constraint(equalTo: surface.bottomAnchor)
         ])
@@ -76,10 +80,14 @@ final class PreviewInspectorController: NSViewController {
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         doc.addSubview(contentStack)
 
+        let docWidth = doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)
+        docWidth.priority = NSLayoutConstraint.Priority(999)
+        let stackTrailing = contentStack.trailingAnchor.constraint(equalTo: doc.trailingAnchor)
+        stackTrailing.priority = NSLayoutConstraint.Priority(999)
         NSLayoutConstraint.activate([
-            doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            docWidth,
             contentStack.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
-            contentStack.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
+            stackTrailing,
             contentStack.topAnchor.constraint(equalTo: doc.topAnchor),
             contentStack.bottomAnchor.constraint(equalTo: doc.bottomAnchor)
         ])

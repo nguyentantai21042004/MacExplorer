@@ -33,4 +33,26 @@ struct Phase4UITests {
         #expect(browser.tab.query.isEmpty)
         #expect(!browser.tab.isRecursiveSearch)
     }
+
+    @Test func directoryWatcherClosesDescriptorAndFlagsRetryWhenFolderIsDeleted() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Explorer-WatcherDelete-\(UUID())")
+            .resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var fired = false
+        let watcher = DirectoryWatcher(url: dir) {
+            fired = true
+        }
+        await watcher.waitUntilReady()
+        #expect(!watcher.needsRetry)
+
+        try FileManager.default.removeItem(at: dir)
+        for _ in 0..<40 where !watcher.needsRetry {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(fired)
+        #expect(watcher.needsRetry)
+    }
 }
